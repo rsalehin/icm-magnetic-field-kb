@@ -26,6 +26,119 @@ SPECTER2 on GPU          → scientific embeddings
   └── NetworkX           → citation graph (relational + graph-hop queries)
 ```
 
+## Motivation & Design Philosophy
+
+**Date added:** 2026-04-04
+
+### Why build this instead of using existing tools?
+
+This section documents the reasoning behind building a custom knowledge
+base rather than using off-the-shelf solutions. Written at Step 6,
+after the core architecture was established.
+
+### Existing tools considered
+
+| Tool | What it does well | Why it was insufficient |
+|---|---|---|
+| NotebookLM (Google) | PDF Q&A, cited answers, clean UI | Cloud-only, 50 paper limit, no graph, no SQL, no domain tuning |
+| Elicit / Consensus | Literature Q&A | Public corpus only, cannot add own papers, no graph |
+| ResearchRabbit | Citation graph visualisation | No text retrieval, no Q&A, visual only |
+| Zotero + plugins | Reference management | No semantic search, no graph queries |
+| Claude / ChatGPT | Q&A over uploaded PDFs | Context window limits, no persistence, no graph traversal |
+| LlamaIndex / LangChain | Framework-level RAG | Shallow graph, no domain chunking, no structured extraction |
+
+### What this system does that no existing tool does
+
+**Graph-hop queries**
+No existing tool supports queries like:
+- *"Trace the methodological lineage from Tribble 1991 through
+  Murgia 2004 to present day"*
+- *"What did papers that cited Murgia 2004 conclude about the
+  magnetic field power spectrum slope?"*
+- *"Which papers use both GRF simulation AND compare against
+  the analytical single-scale model?"*
+
+These require traversing the citation graph while simultaneously
+retrieving grounded text — a qualitatively different query type
+that vector search alone cannot support.
+
+**Structured domain extraction (Layer 3)**
+Storing extracted physical quantities as SQL — σ_RM values,
+spectral indices n, central field strengths B₀, cluster names,
+field models used — enables queries like:
+- *"Which papers report B₀ > 5 µG in non-cooling-flow clusters?"*
+- *"Show all papers that study A119 using RM structure functions"*
+
+This is a database query, not a fuzzy semantic search. The
+precision difference is significant for scientific work.
+
+**Domain-specific embeddings**
+SPECTER2 was trained on 146 million scientific citation pairs.
+It understands that "σ_RM", "rotation measure dispersion", and
+"RM scatter" refer to the same concept. General-purpose models
+used by NotebookLM and ChatGPT treat these as loosely related.
+For astrophysics text with heavy notation, the retrieval accuracy
+difference is substantial.
+
+**Full ownership and privacy**
+The entire system runs locally on the research workstation.
+No paper content, no query history, no extracted knowledge
+leaves the machine. This matters for unpublished results and
+pre-submission work.
+
+**Incremental and persistent**
+The system grows with the research. Drop a new PDF in the
+`papers/` folder, re-run the pipeline — only the new paper
+is processed. All prior ingestion is preserved. No existing
+cloud tool offers this with full control over the pipeline.
+
+### When existing tools are better
+
+This system is not always the right choice. For simple queries
+over a small number of papers, NotebookLM or Claude with an
+uploaded PDF is faster and easier. This system becomes strictly
+better when:
+
+- Queries span more than 10 papers simultaneously
+- Relational queries are needed (which papers, which clusters,
+  which methods, which quantities)
+- Citation graph traversal is required
+- Privacy and offline operation matter
+- The corpus will grow incrementally over time
+- GNN analysis of the citation network is a future goal
+
+All five conditions apply to this project.
+
+### Research context
+
+This knowledge base is built specifically for research on
+turbulent magnetic fields in galaxy clusters at
+Karl-Schwarzschild-Observatorium Tautenburg. The corpus covers
+30 years of ICM magnetic field literature (1995–2026, 251 papers)
+spanning:
+- Faraday rotation measure (RM) observations
+- GRF and BxC/Biot-Savart magnetic field models
+- MHD cosmological simulations
+- Depolarization studies
+- Radio halo morphology
+
+The structured extraction vocabulary (GRF, BxC, σ_RM, β-model,
+Λ_min, Λ_max, spectral index n) is domain-specific and would
+be missed entirely by general-purpose tools.
+
+### Long-term vision
+
+Beyond literature search, the graph structure and node features
+(Layer 4) are designed to support:
+- GNN-based paper recommendation
+- Automated detection of methodological lineages
+- Community detection within the citation graph
+- Identification of contradicting claims across papers
+- Semi-automated literature review generation
+
+The schema was designed with these use cases in mind from the
+start — not retrofitted later.
+
 ### Why this stack
 - **FAISS over Qdrant/Weaviate:** corpus is bounded (~200–500 papers, ~20k chunks);
   no Docker daemon needed; CPU FAISS is fast enough at this scale.
@@ -346,7 +459,57 @@ All 3 resolved correctly. Zero failures.
 ---
 
 ## Step 6 — DuckDB Schema Initialisation
-*(Pending)*
+**Date:** 2026-04-04
+**Branch:** feature/step-06-duckdb-schema
+**Files added:**
+- `src/storage/__init__.py`
+- `src/storage/db.py`
+- `scripts/test_duckdb.py`
+- `scripts/test_duckdb_idempotent.py`
+
+### Goal
+Set up the persistent structured storage layer. DuckDB holds
+Layer 1 bibliographic metadata, normalised authors, Layer 2
+chunks with all content flags, and ingestion state tracking
+per paper across all four pipeline stages.
+
+### What was built
+**`db.py`** — four functions:
+- `get_connection()` — opens/creates DuckDB file, creates
+  parent directory if needed
+- `init_schema()` — creates four tables if not exist:
+  `papers`, `authors`, `chunks`, `ingestion_state`
+- `insert_paper()` — takes Stage A+B dict, inserts into all
+  four tables atomically, idempotent (skips if node_id exists)
+- `get_ingestion_state()` — returns pipeline progress for all
+  papers as list of dicts
+
+### Schema design decisions
+| Decision | Reason |
+|---|---|
+| Four separate tables | Normalisation — authors queried independently of chunks |
+| JSON arrays as VARCHAR | keywords, sections, figure_refs don't need SQL querying; avoids complexity of array types |
+| is_noise flag on chunks | Noise chunks preserved for equation content but excluded from embedding |
+| ingestion_state separate table | Single source of truth for pipeline progress — survives paper re-ingestion |
+| INSERT OR REPLACE on ingestion_state | State always reflects latest run |
+| Idempotent insert | Safe to re-run pipeline on same paper — no duplicates |
+
+### Test results
+| Check | Result |
+|---|---|
+| Schema init | ✓ |
+| Paper insert (Murgia 2004) | ✓ 236 chunks, 5 authors |
+| Noise flagging | ✓ chunks < 30 tokens correctly marked |
+| Second insert skips | ✓ "Already in DB, skipping" |
+| Row counts after double insert | ✓ 1 paper, 236 chunks |
+
+### Known limitations
+- Layer 3 structured extraction not yet stored — will add
+  JSON column to papers table in Step 10
+- No index on chunks.node_id yet — will add before full
+  corpus ingestion in Step 9
+- authors table uses position integer as part of PK —
+  sufficient for read queries but not for fuzzy author search
 
 ---
 
