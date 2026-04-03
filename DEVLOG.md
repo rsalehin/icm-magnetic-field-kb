@@ -155,7 +155,8 @@ GPU   : NVIDIA GeForce RTX 5070 Ti
 **Date:** 2026-04-03
 **Script:** `step3_embedding_check.py`
 
-*(Fill in after running)*
+VRAM: 0.47 GB | Encoding: 6.5 it/s | Shape: (3, 768)
+Warnings: symlinks (harmless), position_ids unexpected (harmless)
 
 ### What we did
 Verified that sentence-transformers correctly dispatches SPECTER2
