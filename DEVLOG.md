@@ -626,8 +626,38 @@ Persists to disk as GraphML between sessions.
   planned for Step 11
 ---
 
-## Step 9 — Full Ingestion Pipeline (single paper)
-*(Pending)*
+## Step 9 — Full Single-Paper Ingestion Pipeline
+**Date:** 2026-04-04
+**Branch:** feature/step-09-ingestion-pipeline
+**Files added:**
+- `src/pipeline.py`
+- `scripts/test_pipeline_single.py`
+
+### Goal
+Wire all four stages into a single end-to-end pipeline function
+that takes a PDF path and writes to all three backends atomically.
+First milestone where the full system runs together.
+
+### What was built
+**`pipeline.py`** — four components:
+- `get_model()` — loads SPECTER2 onto GPU once, reuses across
+  papers via module-level singleton
+- `embed_chunks()` — Stage C: generates embeddings for all
+  non-noise chunks (token_count >= 30), batch size 64, GPU
+- `write_to_storage()` — Stage D: writes to DuckDB, FAISS,
+  NetworkX in sequence; updates faiss_index_id in DuckDB
+  after FAISS write; marks stage_d = done in DB
+- `ingest_paper()` — orchestrates A→B→C→D; checks DuckDB
+  first and skips if already fully ingested
+
+### Performance
+- SPECTER2 load time : ~15s (cached after first run)
+- Per-paper time     : ~3.1s (GPU embedding dominant)
+- Full corpus (251)  : ~13 minutes estimated
+- Noise skipped      : 15/236 chunks for Murgia 2004
+
+### Bug found and fixed
+stage_d was showing 'pending'
 
 ---
 
