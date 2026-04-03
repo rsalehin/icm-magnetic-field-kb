@@ -1,0 +1,32 @@
+# ── Core data layer ───────────────────────────────────────────────────────────
+duckdb==1.5.1
+faiss-cpu==1.13.2
+networkx==3.6.1
+
+# ── ML / embeddings ───────────────────────────────────────────────────────────
+# NOTE: PyTorch must be installed separately:
+#   pip install --pre torch torchvision \
+#     --index-url https://download.pytorch.org/whl/nightly/cu130
+#
+sentence-transformers==5.3.0
+transformers==5.5.0
+tokenizers
+huggingface-hub
+safetensors
+accelerate
+
+# ── PDF parsing ───────────────────────────────────────────────────────────────
+pymupdf==1.27.2.2
+pdfplumber==0.11.9
+
+# ── Utilities ─────────────────────────────────────────────────────────────────
+requests==2.33.0
+tqdm==4.67.1
+numpy
+scipy
+scikit-learn
+python-dotenv
+
+# ── Dev / notebooks ───────────────────────────────────────────────────────────
+jupyter
+ipykernel

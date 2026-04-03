@@ -1,0 +1,72 @@
+# ── Virtual environment ──────────────────────────────────────────────────────
+.venv/
+venv/
+env/
+ENV/
+
+# ── Python ────────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+*.egg
+.eggs/
+
+# ── Jupyter ───────────────────────────────────────────────────────────────────
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# ── Data & indices (large binary files — store separately) ───────────────────
+papers/                         # PDF files
+*.pdf
+*.faiss                         # FAISS index files
+*.index
+data/
+raw/
+
+# ── DuckDB ────────────────────────────────────────────────────────────────────
+*.duckdb
+*.duckdb.wal
+*.db
+
+# ── HuggingFace model cache ───────────────────────────────────────────────────
+.cache/
+models/
+*.safetensors
+*.bin
+*.pt
+*.pth
+
+# ── NetworkX graph dumps ──────────────────────────────────────────────────────
+*.gpickle
+*.gml
+*.graphml
+
+# ── Secrets & credentials ─────────────────────────────────────────────────────
+.env
+.env.*
+secrets.json
+ads_token.txt
+*token*
+*api_key*
+
+# ── OS & editor ───────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/settings.json
+.idea/
+
+# ── Logs & temp ───────────────────────────────────────────────────────────────
+*.log
+*.tmp
+*.temp
+logs/
+tmp/
+
+# ── Test outputs ──────────────────────────────────────────────────────────────
+test_output/
+scratch/
