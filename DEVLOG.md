@@ -514,13 +514,116 @@ per paper across all four pipeline stages.
 ---
 
 ## Step 7 — FAISS Index Initialisation
-*(Pending)*
+**Date:** 2026-04-04
+**Branch:** feature/step-07-faiss-index
+**Files added:**
+- `src/storage/faiss_index.py`
+- `scripts/test_faiss.py`
 
+### Goal
+Set up the vector storage layer. FAISS IndexFlatIP holds
+SPECTER2 embeddings for all non-noise chunks. Supports
+incremental addition of new vectors and exact cosine
+similarity search.
+
+### What was built
+**`faiss_index.py`** — six functions:
+- `get_or_create_index()` — loads existing index from disk
+  or creates new IndexFlatIP (dim=768)
+- `load_id_map()` — loads chunk_id → faiss_row mapping from
+  JSON file
+- `save_id_map()` — persists id_map to disk
+- `save_index()` — writes FAISS index to disk
+- `add_embeddings()` — adds batch of vectors, normalises to
+  unit length, skips already-indexed chunks (idempotent)
+- `search()` — searches index for top-k nearest neighbours,
+  returns list of {chunk_id, score, faiss_row} dicts
+- `get_index_stats()` — summary stats for current index
+
+### Design decisions
+| Decision | Reason |
+|---|---|
+| IndexFlatIP not IndexIVFFlat | Exact search — no approximation error; corpus (~20k chunks) well within exact search range |
+| Cosine via inner product | Normalise vectors to unit length first, then inner product = cosine similarity |
+| Separate id_map JSON | FAISS only stores row indices — need external chunk_id mapping for retrieval |
+| CPU FAISS | Blackwell sm_120 unsupported in faiss-gpu; 20k vectors trivially fast on CPU |
+| GPU used upstream | Embedding generation (Stage C) uses RTX 5070 Ti; FAISS only does lookup |
+| Idempotent add | Skip already-indexed chunks — safe to re-run pipeline |
+
+### Test results
+| Check | Result |
+|---|---|
+| Index creation | ✓ dim=768 IndexFlatIP |
+| Add 10 vectors | ✓ |
+| Idempotency (skip duplicates) | ✓ |
+| Add 5 more incremental | ✓ 15 total |
+| Search top hit | ✓ c0000 score=1.0000 exact match |
+| Persist and reload | ✓ 15 vectors restored from disk |
+
+### Known limitations
+- Vectors not yet populated with real SPECTER2 embeddings —
+  tested with synthetic random vectors; real embeddings added
+  in Step 9
+- No FAISS GPU index — faiss-gpu does not support Blackwell
+  sm_120; CPU index sufficient at current scale
+- id_map loaded fully into RAM — fine for 20k chunks,
+  revisit if corpus grows beyond 500k vectors
 ---
 
-## Step 8 — NetworkX Graph Initialisation
-*(Pending)*
+## Step 8 — NetworkX Citation Graph
+**Date:** 2026-04-04
+**Branch:** feature/step-08-networkx-graph
+**Files added:**
+- `src/storage/graph.py`
+- `scripts/test_graph.py`
 
+### Goal
+Set up the graph storage layer. NetworkX DiGraph holds papers
+as nodes and citation relationships as directed typed edges.
+Persists to disk as GraphML between sessions.
+
+### What was built
+**`graph.py`** — six functions:
+- `get_or_create_graph()` — loads GraphML from disk or creates
+  new DiGraph
+- `save_graph()` — persists to GraphML
+- `add_paper_node()` — adds paper with Layer 1 attributes as
+  node attributes; idempotent
+- `add_citation_edges()` — adds directed edges with citation_role
+  and context_chunk_id; creates stub nodes for cited papers not
+  yet ingested
+- `mark_seed()` — flags seed papers in graph
+- `get_neighbors()` — returns in/out neighbors with edge
+  attributes; supports direction='in', 'out', 'both'
+- `get_graph_stats()` — summary stats including year range
+  and seed count
+
+### Design decisions
+| Decision | Reason |
+|---|---|
+| DiGraph not Graph | Citations are directed — A cites B ≠ B cites A |
+| GraphML format | Human-readable XML, NetworkX native, survives version changes |
+| Stub nodes for uncrawled refs | Graph stays consistent even when target paper not yet ingested |
+| citation_role on edges | Enables filtering by relationship type — foundational vs methodological vs incidental |
+| context_chunk_id on edges | Traces exactly which chunk contains the citation |
+| is_seed flag on nodes | Needed for graph traversal strategies that start from seeds |
+
+### Test results
+| Check | Result |
+|---|---|
+| Graph creation | ✓ |
+| 2 full nodes + 1 stub | ✓ |
+| Directed edges with roles | ✓ methodological + foundational |
+| Neighbour traversal | ✓ |
+| Persist and reload | ✓ 3 nodes, 2 edges |
+
+### Known limitations
+- Citation edges currently added manually with synthetic data —
+  real citation extraction from ADS happens in Step 9
+- GraphML loads entire graph into RAM — fine for 251 papers,
+  revisit if corpus grows beyond ~5000 nodes
+- No community detection or graph metrics computed yet —
+  planned for Step 11
 ---
 
 ## Step 9 — Full Ingestion Pipeline (single paper)
