@@ -295,8 +295,53 @@ All 5 papers: zero failures, consistent ~47 tokens/chunk average.
 
 ---
 
-## Step 5 — Chunking Pipeline
-*(Pending)*
+## Step 5 — ADS Metadata Enrichment (Stage B)
+**Date:** 2026-04-04
+**Branch:** feature/step-05-ads-enrichment
+**Files added:**
+- `src/enrichment/__init__.py`
+- `src/enrichment/ads_enricher.py`
+- `scripts/test_ads_enricher.py`
+
+### Goal
+Fill in Layer 1 bibliographic fields (title, authors, journal, DOI,
+abstract, citation count, bibcode) by querying the NASA ADS API
+using the arxiv_id derived from the filename in Stage A.
+
+### What was built
+**`ads_enricher.py`**:
+- Loads ADS token from `.env` via python-dotenv
+- `enrich_from_arxiv_id()` — queries ADS search endpoint,
+  handles both old-style (astro-ph/0406225) and new-style
+  (0905.3552) arxiv IDs
+- Fallback: if primary query fails, retries with identifier field
+- Extracts DOI from identifier list (starts with "10.")
+- `enrich_paper()` — takes Stage A dict, merges ADS data into
+  Layer 1, updates meta.stage_b status, respects rate limit
+  via 0.3s sleep between calls
+
+### Design decisions
+| Decision | Reason |
+|---|---|
+| ADS token in `.env` not source code | Never expose credentials in git |
+| 0.3s sleep between calls | ADS rate limit ~5000/day unauthenticated, polite crawling |
+| Merge strategy: existing fields preserved | pdf_path and total_pages from Stage A must not be overwritten |
+| stage_b = "failed" not exception | Pipeline continues on ADS miss; paper still usable with Stage A data |
+
+### Test results
+| Paper | Bibcode | Citations | stage_b |
+|---|---|---|---|
+| Murgia 2004 | 2004A&A...424..429M | 255 | done |
+| Bonafede 2009 | 2009A&A...503..707B | 129 | done |
+| Loi 2019 | 2019MNRAS.485.5285L | 16 | done |
+
+All 3 resolved correctly. Zero failures.
+
+### Known limitations
+- ADS occasionally returns arXiv DOI (10.48550/arXiv.XXX) instead
+  of journal DOI — happens when journal has not yet registered DOI
+  with ADS. Acceptable for now.
+- No retry logic on network timeout — will add in pipeline manager.
 
 ---
 
