@@ -1,0 +1,15 @@
+Your PDFs
+    ↓
+PyMuPDF/pdfplumber     → extracts raw text + structure
+    ↓
+SPECTER2 (GPU)         → converts chunks to vectors
+    ↓
+         ┌─────────────────────────────────────┐
+         │  FAISS       vector similarity      │
+         │  DuckDB      structured metadata    │  ← your knowledge base
+         │  NetworkX    citation graph         │
+         └─────────────────────────────────────┘
+    ↓
+Query engine           → hybrid search across all three
+    ↓
+Your answer            → grounded in real paper text
