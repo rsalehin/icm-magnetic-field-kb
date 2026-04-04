@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ICM · Knowledge Base</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+<link rel="stylesheet" href="/static/style.css">
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:ital,wght@0,300;0,400;0,500;1,400&family=Barlow:wght@300;400;500;600&family=Barlow+Condensed:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://d3js.org/d3.v7.min.js"></script>
+
+</head>
+<body>
+
+    <!-- Citation tooltip -->
+<div id="cite-tooltip">
+  <div class="ct-rank" id="ct-rank">E1</div>
+  <div class="ct-title" id="ct-title">—</div>
+  <div class="ct-meta">
+    <div>year <span id="ct-year">—</span></div>
+    <div>journal <span id="ct-journal">—</span></div>
+    <div>section <span id="ct-section">—</span></div>
+    <div>id <span id="ct-id" style="font-size:9px;word-break:break-all">—</span></div>
+  </div>
+</div>
+<!-- Top bar -->
+<div id="topbar">
+  <div id="logo">ICM<span>·KB</span></div>
+  <button class="tab-btn active" onclick="switchTab('chat')">💬 Chat</button>
+  <button class="tab-btn" onclick="switchTab('graph')">🕸 Graph</button>
+  <button class="tab-btn" onclick="switchTab('stats')">📊 Stats</button>
+  <div id="status-bar">
+    <div class="status-dot"></div>
+    <span id="status-text">ready</span>
+  </div>
+</div>
+
+<div id="app">
+
+<!-- ── CHAT TAB ─────────────────────────────────────────────────────────── -->
+<div id="chat-tab" class="tab-content active">
+
+  <div id="sidebar">
+    <div id="sidebar-header">
+      <button id="new-chat-btn" onclick="newConversation()">+ New conversation</button>
+    </div>
+    <div id="conv-list"></div>
+  </div>
+
+  <div id="chat-main">
+    <div id="messages">
+      <div id="welcome">
+        <h2>Intracluster Magnetic Fields</h2>
+        <p>Query 251 astrophysics papers with grounded evidence and citations. Ask factual, comparative, or synthesis questions.</p>
+        <div class="welcome-suggestions">
+          <button class="suggestion-btn" onclick="askSuggestion(this)">What spectral index did Murgia 2004 find for the magnetic field power spectrum in Abell 119?</button>
+          <button class="suggestion-btn" onclick="askSuggestion(this)">How does the GRF magnetic field model differ from MHD cosmological simulations?</button>
+          <button class="suggestion-btn" onclick="askSuggestion(this)">What is the typical central magnetic field strength B₀ observed in galaxy clusters?</button>
+          <button class="suggestion-btn" onclick="askSuggestion(this)">What papers studied Faraday rotation in the Coma cluster?</button>
+        </div>
+      </div>
+    </div>
+    <div id="input-area">
+      <div id="input-row">
+        <textarea
+          id="question-input"
+          placeholder="Ask about intracluster magnetic fields, Faraday rotation, radio observations..."
+          rows="1"
+          onkeydown="handleKey(event)"
+          oninput="autoResize(this)"
+        ></textarea>
+        <button id="send-btn" onclick="sendQuestion()">Send</button>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- ── GRAPH TAB ─────────────────────────────────────────────────────────── -->
+<div id="graph-tab" class="tab-content">
+
+  <div id="graph-sidebar">
+    <div class="graph-filter-section">
+      <div class="filter-label">Search papers</div>
+      <input class="filter-input" id="graph-search" type="text"
+             placeholder="title, author..." oninput="filterGraph()">
+    </div>
+
+    <div class="graph-filter-section">
+      <div class="filter-label">Year range</div>
+      <input class="filter-input" id="year-min" type="number"
+             placeholder="from" min="1990" max="2026" oninput="filterGraph()">
+      <input class="filter-input" id="year-max" type="number"
+             placeholder="to"   min="1990" max="2026" oninput="filterGraph()">
+    </div>
+
+    <div class="graph-filter-section">
+      <div class="filter-label">Edge types</div>
+      <button class="filter-btn active" id="btn-cites"
+              onclick="toggleEdge('cites', this)">CITES</button>
+      <button class="filter-btn active" id="btn-cocited"
+              onclick="toggleEdge('co_cited', this)">CO-CITED</button>
+    </div>
+
+    <div class="graph-filter-section">
+      <div class="filter-label">Era</div>
+      <div class="era-legend">
+        <div class="era-item"><div class="era-dot" style="background:#2d5a3d"></div>1995–1999</div>
+        <div class="era-item"><div class="era-dot" style="background:#3d6b2d"></div>2000–2004</div>
+        <div class="era-item"><div class="era-dot" style="background:#6b7a2d"></div>2005–2009</div>
+        <div class="era-item"><div class="era-dot" style="background:#7a5c2d"></div>2010–2014</div>
+        <div class="era-item"><div class="era-dot" style="background:#7a3d2d"></div>2015–2019</div>
+        <div class="era-item"><div class="era-dot" style="background:#5a2d7a"></div>2020–2026</div>
+      </div>
+    </div>
+    <div class="graph-filter-section">
+      <div class="filter-label">Query view</div>
+      <button id="query-graph-btn" onclick="toggleQueryGraph(this)">
+        Focus on evidence
+      </button>
+      <div style="font-family:var(--mono);font-size:10px;color:var(--text-dim);margin-top:4px" id="evidence-count-label">
+        no query yet
+      </div>
+    </div>
+
+    <div id="node-info">
+      <div id="node-info-title">—</div>
+      <div class="node-info-kv">
+        <span class="node-info-k">year</span>
+        <span class="node-info-v" id="ni-year">—</span>
+        <span class="node-info-k">journal</span>
+        <span class="node-info-v" id="ni-journal">—</span>
+        <span class="node-info-k">citations</span>
+        <span class="node-info-v" id="ni-cites">—</span>
+        <span class="node-info-k">id</span>
+        <span class="node-info-v" id="ni-id" style="font-size:9px;word-break:break-all">—</span>
+      </div>
+    </div>
+  </div>
+
+  <div id="graph-container">
+    <div id="graph-loading">
+      <div class="thinking-dots">
+        <span></span><span></span><span></span>
+      </div>
+      <span>Loading citation graph...</span>
+    </div>
+    <svg id="graph-svg"></svg>
+    <div id="graph-controls">
+      <button class="graph-ctrl-btn" title="Zoom in"  onclick="graphZoom(1.3)">+</button>
+      <button class="graph-ctrl-btn" title="Zoom out" onclick="graphZoom(0.7)">−</button>
+      <button class="graph-ctrl-btn" title="Reset"    onclick="graphReset()">⌂</button>
+    </div>
+  </div>
+
+</div>
+
+<!-- ── STATS TAB ─────────────────────────────────────────────────────────── -->
+<div id="stats-tab" class="tab-content">
+  <div class="stats-grid" id="stats-cards"></div>
+  <div class="stats-two-col">
+    <div class="stats-section">
+      <div class="stats-section-title">Papers by era</div>
+      <div class="bar-chart" id="era-chart"></div>
+    </div>
+    <div class="stats-section">
+      <div class="stats-section-title">Top journals</div>
+      <div class="bar-chart" id="journal-chart"></div>
+    </div>
+  </div>
+  <div class="stats-section">
+    <div class="stats-section-title">Top first authors</div>
+    <div class="bar-chart" id="author-chart"></div>
+  </div>
+  <div id="query-stats-section">
+    <div class="query-stats-title">Last query · Evidence analysis</div>
+    <div id="query-stats-content"></div>
+  </div>
+</div>
+
+</div><!-- #app -->
+<script>
+// Hot reload — polls server and refreshes when it comes back after restart
+(function() {
+  let serverWasDown = false;
+  setInterval(async () => {
+    try {
+      await fetch('/api/stats', { signal: AbortSignal.timeout(1000) });
+      if (serverWasDown) {
+        serverWasDown = false;
+        window.location.reload();
+      }
+    } catch {
+      serverWasDown = true;
+    }
+  }, 1500);
+})();
+</script>
+<script src="/static/script.js"></script>
+</body>
+</html>

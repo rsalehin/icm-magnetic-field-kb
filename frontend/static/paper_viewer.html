@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ICM · Paper Viewer</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Barlow+Condensed:wght@500;600;700&display=swap" rel="stylesheet">
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg:#07090f; --bg-panel:#0c0f18; --border:#1a2035;
+  --text:#b8c8d8; --text-dim:#5a7090; --text-bright:#ddeeff;
+  --cyan:#20b8d8; --amber:#e8a020; --mono:'DM Mono',monospace;
+  --cond:'Barlow Condensed',sans-serif;
+}
+html, body { height:100%; overflow:hidden; background:var(--bg); color:var(--text); font-family:var(--mono); }
+
+#topbar {
+  height:44px; background:var(--bg-panel);
+  border-bottom:1px solid var(--border);
+  display:flex; align-items:center; padding:0 16px; gap:16px;
+}
+#logo { font-family:var(--cond); font-weight:700; font-size:13px; letter-spacing:0.12em; color:var(--cyan); text-transform:uppercase; flex-shrink:0; }
+#paper-title { font-size:11px; color:var(--text-dim); flex:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+#back-btn {
+  padding:5px 14px; background:none; border:1px solid var(--border);
+  border-radius:2px; color:var(--text-dim); font-family:var(--cond);
+  font-size:11px; font-weight:600; letter-spacing:0.06em;
+  text-transform:uppercase; cursor:pointer; flex-shrink:0;
+  transition:border-color 0.15s,color 0.15s;
+}
+#back-btn:hover { border-color:var(--cyan); color:var(--cyan); }
+
+#info-bar {
+  height:36px; background:var(--bg); border-bottom:1px solid var(--border);
+  display:flex; align-items:center; padding:0 16px; gap:20px;
+  font-size:10px; color:var(--text-dim);
+}
+.info-item span { color:var(--amber); margin-left:6px; }
+
+#search-bar { display:flex; align-items:center; gap:8px; margin-left:auto; }
+#search-input {
+  background:#0f1420; border:1px solid var(--border); border-radius:2px;
+  color:var(--text); font-family:var(--mono); font-size:10px;
+  padding:4px 8px; width:240px;
+}
+#search-input:focus { outline:none; border-color:var(--amber); }
+#search-note { font-size:10px; color:var(--text-dim); }
+
+#pdf-frame {
+  width:100%; border:none;
+  height:calc(100vh - 80px);
+}
+
+#claim-bar {
+  position:fixed; bottom:0; left:0; right:0;
+  background:#0a1520; border-top:1px solid #7a4a08;
+  padding:6px 16px; font-size:11px; display:none;
+}
+#claim-bar.visible { display:block; }
+#claim-text { color:var(--amber); margin-top:2px; line-height:1.5; }
+</style>
+</head>
+<body>
+
+<div id="topbar">
+  <div id="logo">ICM·KB</div>
+  <div id="paper-title">Loading...</div>
+  <button id="back-btn" onclick="window.close()">← Close</button>
+</div>
+
+<div id="info-bar">
+  <div class="info-item">paper <span id="info-id">—</span></div>
+  <div class="info-item">year <span id="info-year">—</span></div>
+  <div class="info-item">page <span id="info-page">—</span></div>
+  <div id="search-bar">
+    <span id="search-note">Use Ctrl+F inside the PDF to search</span>
+  </div>
+</div>
+
+<iframe id="pdf-frame"></iframe>
+
+<div id="claim-bar" id="claim-bar">
+  <div style="font-family:var(--cond);font-size:10px;letter-spacing:0.1em;text-transform:uppercase;color:#5a7090">Evidence chunk</div>
+  <div id="claim-text"></div>
+</div>
+
+<script>
+const params  = new URLSearchParams(window.location.search);
+const nodeId  = params.get('id')      || '';
+const page    = parseInt(params.get('page') || '1');
+const snippet = params.get('snippet') || '';
+const year    = params.get('year')    || '';
+const title   = params.get('title')   || nodeId;
+
+document.getElementById('paper-title').textContent = decodeURIComponent(title);
+document.getElementById('info-id').textContent     = nodeId.replace('arxiv:','');
+document.getElementById('info-year').textContent   = year;
+document.getElementById('info-page').textContent   = `${page} (scroll to find)`;
+
+if (snippet) {
+  const bar = document.getElementById('claim-bar');
+  document.getElementById('claim-text').textContent = decodeURIComponent(snippet);
+  bar.classList.add('visible');
+  // Shrink iframe to make room for claim bar
+  document.getElementById('pdf-frame').style.height = 'calc(100vh - 120px)';
+}
+
+// Load PDF directly — Chrome's built-in viewer handles it
+// #page=N jumps to the correct page in Chrome's PDF viewer
+const pdfUrl = `/api/pdf/${nodeId}#page=${page}`;
+document.getElementById('pdf-frame').src = pdfUrl;
+</script>
+</body>
+</html>
