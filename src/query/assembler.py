@@ -177,8 +177,6 @@ def detect_conflicts(chunks: list[dict]) -> dict:
     }
 
 
-# ── Abstention signal ─────────────────────────────────────────────────────────
-
 def compute_abstention(
     chunks:    list[dict],
     conflicts: dict,
@@ -188,13 +186,6 @@ def compute_abstention(
     """
     Compute abstention signal based on numeric rules.
     Returns (should_abstain, reason).
-
-    Abstain if ANY of:
-    - Fewer than 3 distinct supporting chunks
-    - Fewer than min_papers distinct papers
-    - Max rerank score below threshold (0.30)
-    - All chunks from single paper
-    - Contradictory evidence present
     """
     if not chunks:
         return True, "No evidence chunks retrieved"
@@ -202,7 +193,6 @@ def compute_abstention(
     distinct_papers = len({c["node_id"] for c in chunks})
     max_score       = max((c.get("rerank_score", 0) for c in chunks),
                           default=0)
-    single_source   = distinct_papers == 1
 
     if len(chunks) < 3:
         return True, f"Insufficient evidence: only {len(chunks)} chunks"
@@ -216,7 +206,7 @@ def compute_abstention(
                       f"below threshold {threshold}")
 
     if conflicts["has_disagreement"]:
-        return False, "disagreement_present"  # don't abstain, but flag
+        return False, "disagreement_present"
 
     return False, None
 
