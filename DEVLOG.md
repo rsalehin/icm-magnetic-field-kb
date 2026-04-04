@@ -766,6 +766,71 @@ before BM25 runs on the remaining pool.
 - Build time      : <1 second
 - Cache size      : ~200MB
 
+
+## Step 10b — BGE-M3 Chunk Embeddings
+**Date:** 2026-04-04
+**Branch:** feature/step-10b-bge-embeddings
+**Files added:**
+- `src/query/bge_embedder.py`
+- `scripts/test_bge.py`
+- `scripts/build_bge_index.py`
+
+### Goal
+Build second dense index for chunk-level evidence retrieval.
+BGE-M3 is better than SPECTER2 for exact chunk retrieval —
+SPECTER2 handles paper-level similarity, BGE-M3 handles
+precise evidence grounding.
+
+### What was built
+**`bge_embedder.py`** — eight functions:
+- `get_bge_model()` — loads BAAI/bge-m3 on GPU, fp16,
+  singleton pattern
+- `get_or_create_bge_index()` — loads/creates IndexFlatIP
+  dim=1024
+- `load_bge_id_map()` / `save_bge_id_map()` — chunk_id →
+  bge_faiss_row mapping
+- `embed_chunks_bge()` — document-side embedding, no prefix,
+  normalised to unit length
+- `embed_query_bge()` — query-side embedding with asymmetric
+  instruction prefix
+- `build_bge_index_from_db()` — pulls all non-noise chunks
+  from DuckDB, embeds in batches, saves FAISS + id_map +
+  raw numpy matrix; resumable
+- `bge_search()` — searches with optional node_id filter
+
+### Design decisions
+| Decision | Reason |
+|---|---|
+| Separate from SPECTER2 index | Different roles — paper vs chunk retrieval |
+| fp16 precision | Halves VRAM usage, negligible quality loss |
+| Asymmetric prefix on query | BGE-M3 explicitly designed for this |
+| Raw matrix saved as .npy | Enables offline rescoring, clustering, debugging |
+| Resumable embedding | Safe to interrupt and restart |
+| node_id filter in search | Restricts to paper pool from Stage 1 |
+
+### Issue encountered
+FlagEmbedding 1.3.5 incompatible with transformers 5.5.0 —
+`is_torch_fx_available` removed in transformers 5.x.
+Fix: upgraded FlagEmbedding from source via pip install
+from GitHub.
+
+### Test results (100-chunk sample)
+| Check | Result |
+|---|---|
+| Shape | ✓ (100, 1024) |
+| All norms = 1.0 | ✓ |
+| Search relevance | ✓ power law magnetic field chunk top hit |
+| Asymmetric prefix | ✓ changes similarity score |
+
+### Full corpus results
+| Metric | Value |
+|---|---|
+| Chunks embedded | 58,077 |
+| FAISS vectors | 58,077 |
+| ID map entries | 58,077 |
+| Match | ✓ |
+| Index file | data/faiss/bge_chunks.index |
+| Raw matrix | data/faiss/bge_chunks_matrix.npy |
 ## Step 11 — Query Engine
 *(Pending)*
 
