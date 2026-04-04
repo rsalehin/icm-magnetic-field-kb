@@ -995,6 +995,64 @@ final rank 1. This is exactly the reranker's job.
 | Diversity after reranking | Let reranker score freely first |
 | normalize=False (predict) | CrossEncoder.predict handles normalisation |
 | max 2 chunks/paper for synthesis | Forces diversity across literature |
+
+## Step 10f — Evidence Assembler
+**Date:** 2026-04-04
+**Branch:** feature/step-10f-evidence-assembler
+**Files added:**
+- `src/query/assembler.py`
+- `scripts/test_assembler.py`
+
+### Goal
+Structure reranked chunks into a typed evidence pack before
+passing to the generator. Handles deduplication, conflict
+detection, abstention signal, and paper grouping.
+
+### What was built
+**`assembler.py`** — five components:
+- `deduplicate_chunks()` — cosine similarity via BGE matrix
+  (threshold=0.92); falls back to word overlap if matrix
+  unavailable; keeps higher rerank_score on duplicates
+- `detect_conflicts()` — rule-based lexical cue counting:
+  positive, negative, uncertainty patterns; flags disagreement
+  when negative cues appear in 2+ distinct papers
+- `compute_abstention()` — numeric rules: <3 chunks, <min_papers,
+  max_score<0.30, single source → abstain
+- `group_by_paper()` — groups chunks by paper, attaches DuckDB
+  metadata (title, year, journal, bibcode)
+- `assemble_evidence()` — orchestrates all steps, returns
+  typed evidence pack with support_stats
+
+### Bug found and fixed
+Abstract chunks had node_id format `arxiv:....__abstract`
+causing DuckDB lookup to fail → year and title showing None.
+Fix: normalise node_id by stripping `__abstract` suffix
+before metadata lookup and group assignment.
+
+### Test results
+| Query | Abstain | Chunks | Papers | Disagreement |
+|---|---|---|---|---|
+| Murgia 2004 spectral index | False | 8 | 6 | False |
+| GRF vs BxC comparison | False* | 12 | 10 | True |
+
+*Disagreement flagged but not abstaining — correct behaviour.
+GRF vs BxC is a genuine ongoing debate in the literature.
+
+### Conflict detection working
+For GRF vs BxC query:
+- "GRF models are still too simple to fully capture..."
+  → negative cue detected
+- Flagged in 2 papers → has_disagreement = True
+- Generator will be instructed to report disagreement explicitly
+
+### Key design decisions
+| Decision | Reason |
+|---|---|
+| Cosine for dedup only | Cosine cannot detect contradiction |
+| Rule-based for conflict | Explicit cue phrases more reliable than embedding proximity |
+| Abstention is numeric | No vague vibes — precise thresholds enforced |
+| Disagreement does not abstain | Report conflict rather than refuse to answer |
+| Groups sorted by best rerank score | Most relevant paper leads the evidence pack |
 ## Step 11 — Query Engine
 *(Pending)*
 
