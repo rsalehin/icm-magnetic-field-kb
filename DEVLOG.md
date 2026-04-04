@@ -660,7 +660,51 @@ First milestone where the full system runs together.
 stage_d was showing 'pending'
 
 ---
+## Step 9b — Batch Ingestion Runner
+**Date:** 2026-04-04
+**Branch:** feature/step-09b-batch-ingestion
+**Files added:**
+- `scripts/ingest_all.py`
 
+### Goal
+Process all 251 PDFs through the full pipeline in one run.
+Resumable, fault-tolerant, with progress bar and log file.
+
+### What was built
+**`ingest_all.py`** — batch runner with:
+- `--limit N` flag for test runs on first N papers
+- `--skip-ads` flag for offline testing
+- tqdm progress bar per paper
+- saves all three backends after every paper — no data
+  loss on crash or interrupt
+- timestamped log file at `data/ingestion_log.txt`
+- full summary on completion
+
+### Full corpus results
+| Metric | Result |
+|---|---|
+| Papers processed | 251/251 |
+| Papers failed | 0 |
+| Total time | 16.8 minutes |
+| Avg per paper | ~4s |
+| FAISS vectors | 58,077 |
+| Graph nodes | 251 |
+| DuckDB rows | 251 papers, ~58k chunks |
+
+### Test methodology
+- Ran with `--limit 5` first — verified 5/5 clean
+- Then ran full corpus — 251/251 clean
+- Confirmed resumability: 5 pre-ingested papers
+  correctly skipped on full run
+
+### Known limitations
+- Graph edges = 0 — citation edge extraction from
+  ADS references endpoint planned for Step 11
+- ADS called for every paper even on resume — will
+  add local cache in future
+- No parallel processing — sequential by design to
+  respect ADS rate limits; GPU is the bottleneck
+  anyway at ~4s/paper
 ## Step 10 — Layer 3 LLM Extraction
 *(Pending)*
 
