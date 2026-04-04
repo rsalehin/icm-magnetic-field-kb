@@ -705,10 +705,66 @@ Resumable, fault-tolerant, with progress bar and log file.
 - No parallel processing — sequential by design to
   respect ADS rate limits; GPU is the bottleneck
   anyway at ~4s/paper
-## Step 10 — Layer 3 LLM Extraction
-*(Pending)*
+## Step 10a — BM25 Lexical Index
+**Date:** 2026-04-04
+**Branch:** feature/step-10a-bm25-index
+**Files added:**
+- `src/query/__init__.py`
+- `src/query/bm25_index.py`
+- `scripts/test_bm25.py`
 
----
+### Goal
+Build sparse lexical retrieval index over all 58,077 chunks
+plus 251 abstracts. Handles exact scientific term retrieval
+that dense SPECTER2 embeddings miss (σ_RM, Burn law, LOFAR,
+BxC, Briggs weighting).
+
+### What was built
+**`bm25_index.py`** — five components:
+- `tokenise()` — scientific tokeniser preserving Greek letters,
+  subscripts, telescope acronyms, method names
+- `build_weighted_text()` — section_title repeated 2x +
+  chunk_text + keywords for weighted field
+- `build_corpus_from_db()` — pulls non-noise chunks from
+  DuckDB, writes JSONL canonical store; also extracts
+  abstracts as special documents with title repeated 3x
+- `build_bm25_index()` — builds BM25Okapi from JSONL,
+  saves pickle cache
+- `bm25_search()` — searches with optional node_id filter
+  to restrict to paper pool from Stage 1 retrieval
+
+### Design decisions
+| Decision | Reason |
+|---|---|
+| JSONL as canonical store | Reproducible, version-safe, DuckDB-independent |
+| Pickle as cache artifact | Fast load at query time, regeneratable |
+| Abstracts as separate boosted docs | Higher signal for discovery queries |
+| Title 3x, section 2x repetition | Simple weighted field without schema changes |
+| node_id filter in search | Enables chunk-phase restriction to paper pool |
+| Scientific tokeniser | Preserves σ_RM, beta-model, LOFAR, MeerKAT exactly |
+
+### Test results
+| Query | Top result | Correct? |
+|---|---|---|
+| Burn law depolarization sigma_RM | arxiv:1002.0811 — depolarization section | ✓ |
+| Gaussian random field power spectrum | arxiv:2507.22006 — turbulent magnetic sim | ✓ |
+| Faraday rotation intracluster magnetic field | astro-ph/0505144 — RM diagnostics | ✓ |
+| LOFAR observations galaxy cluster | arxiv:2201.12207 — LOFAR 144MHz | ✓ |
+| BxC Biot-Savart convolution | arxiv:1711.03252 — deep learning paper | ✗ |
+
+### Known limitation
+BxC query returned off-topic results — "convolution" and
+"field" match deep learning papers. This is expected BM25
+behaviour on a broad corpus. Fixed by paper-pool restriction:
+SPECTER2 paper filtering in Step 10d removes off-topic papers
+before BM25 runs on the remaining pool.
+
+### Corpus stats
+- Chunk documents : 58,077
+- Abstract docs   : 251
+- Total indexed   : 58,328
+- Build time      : <1 second
+- Cache size      : ~200MB
 
 ## Step 11 — Query Engine
 *(Pending)*
