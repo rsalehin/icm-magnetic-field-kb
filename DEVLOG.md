@@ -1053,8 +1053,148 @@ For GRF vs BxC query:
 | Abstention is numeric | No vague vibes — precise thresholds enforced |
 | Disagreement does not abstain | Report conflict rather than refuse to answer |
 | Groups sorted by best rerank score | Most relevant paper leads the evidence pack |
-## Step 11 — Query Engine
-*(Pending)*
+
+## Step 10g — Evaluation Set
+**Date:** 2026-04-04
+**Branch:** feature/step-10g-evaluation-set
+**Files added:**
+- `scripts/generate_eval_set.py`
+- `scripts/regenerate_eval_questions.py`
+- `scripts/test_eval_gen.py`
+- `scripts/corpus_overview.py`
+- `scripts/review_eval_set.py`
+- `scripts/debug_eval_gen.py`
+- `scripts/debug_ollama.py`
+- `scripts/evaluate.py`
+- `data/eval_set_final.json`
+
+### Goal
+Build a 30-question evaluation set with ground truth grounded
+in actual corpus chunks. Automated generation using Qwen3
+to avoid manual domain expertise requirement.
+
+### Methodology
+1. Corpus overview — understand temporal + author distribution
+2. Stratified chunk sampling — 5 chunks per era (1995–2026)
+3. Qwen3 generates Q&A pairs from chunk text
+4. Quality filter — overlap check, length check, no figure refs
+5. Manual review — identified 12 off-topic questions
+6. ICM-targeted regeneration — strict domain prompt
+7. 5 abstention questions generated separately
+
+### Final evaluation scores
+| Metric | Score |
+|---|---|
+| Abstention accuracy | 23/30 (77%) |
+| Paper recall | 60% |
+| Contains score | 64% |
+| Avg rerank score | 0.839 |
+
+### Key findings
+- Paper recall metric is misleading — system finds correct
+  answers from citing papers, not just source papers
+- 5 abstention questions failed — too close to corpus content;
+  domain scope check made things worse (60% → reverted)
+- Q016, Q023 correctly abstain due to very low rerank scores
+  (0.117, 0.011) — questions were too narrow
+
+---
+
+## Step 10h — Qwen3 Generator
+**Date:** 2026-04-04
+**Branch:** feature/step-10h-generator
+**Files added:**
+- `src/query/generator.py`
+- `scripts/test_generator.py`
+
+### Goal
+Wire evidence pack into Qwen3:14b for grounded answer
+synthesis with per-claim citations.
+
+### What was built
+**`generator.py`** — four components:
+- `format_evidence()` — structures evidence as numbered
+  blocks [E1]...[En] with paper metadata
+- `build_prompt()` — assembles system context, evidence,
+  abstention signals, and question
+- `generate_answer()` — routes to thinking/non-thinking
+  mode, extracts cited evidence items from [E1] references
+- `print_result()` — formatted output for terminal
+
+### Routing
+- `non_thinking`: fact, discovery — fast, direct
+- `thinking`: comparison, synthesis — careful reasoning
+
+### Test results
+| Query | Mode | Result |
+|---|---|---|
+| Murgia 2004 spectral index n | non-thinking | ✓ q≈2 for A119, cited correctly |
+| Radio mini-halo size | non-thinking | ✓ ≃500 kpc, two sources cited |
+| GRF vs MHD comparison | thinking | ✓ two differences, honest caveat |
+| Coma optical luminosity | non-thinking | ✓ abstained — not in evidence |
+
+### Key behaviours
+- Generator correctly uses citing papers as evidence sources
+- Thinking mode shows reasoning trace — auditable
+- Out-of-scope questions refused without triggering numeric
+  abstention — instruction following handles this layer
+- Citations extracted from [E1] markers in generated text
+## Step 11 — Citation Edge Construction
+**Date:** 2026-04-04
+**Branch:** feature/step-11-citation-edges
+**Files added:**
+- `src/storage/citation_graph.py`
+- `scripts/build_citation_edges.py`
+- `scripts/test_citation_edges.py`
+- `scripts/test_graph_retrieval.py`
+
+### Goal
+Populate NetworkX graph with real citation edges from ADS.
+Activates graph expansion in the retriever pipeline.
+
+### What was built
+**`citation_graph.py`**:
+- `fetch_references()` — queries ADS references endpoint
+  per bibcode, 0.3s rate limiting
+- `extract_arxiv_id()` — pulls arXiv ID from ADS identifier
+  field for node_id construction
+- `infer_citation_role()` — assigns foundational/incidental
+  based on known seminal paper bibcodes
+- `add_citation_edges_from_ads()` — main builder: iterates
+  251 papers, fetches refs, adds CITES edges + stub nodes
+- `add_co_citation_edges()` — adds CO_CITED edges between
+  corpus papers sharing ≥3 common references
+
+### Full corpus results
+| Metric | Value |
+|---|---|
+| Papers processed | 251/251, 0 failed |
+| CITES edges | 19,919 |
+| New stub nodes | 7,924 |
+| Total nodes | 8,232 |
+| CO_CITED edges (min_shared=3) | 10,604 |
+| Total edges | 30,523 |
+
+### Retriever update
+- Graph expansion activated in `retrieve_paper_candidates()`
+- 1-hop citation expansion (strong edges only: foundational,
+  methodological, data_source) up to 15 neighbours
+- 1-hop co-citation expansion for synthesis/discovery only
+- Fixed DuckDB `ANY(?)` → `IN (?,?,?)` for Windows compatibility
+- Fixed FAISS search: n_retrieve = paper_k × 20 to get enough
+  unique paper candidates
+
+### Bug found and fixed
+`retrieve_paper_candidates` had duplicate stub block and
+missing return — the old stub comment block remained alongside
+the new expansion code, causing the function to fall through.
+Fix: rewrote the entire function cleanly as single code path.
+
+### Graph expansion test
+- Without graph: 40 candidates, 23 unique papers in chunks
+- With graph: 40→42 candidates, pipeline works end to end
+- Graph expansion adds breadth — RRF scoring determines
+  which candidates survive into final evidence
 
 ---
 
