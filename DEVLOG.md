@@ -886,6 +886,115 @@ retriever, reranker, and generator consume without ambiguity.
 | Intent-dependent budgets | Synthesis needs 150 papers, fact only needs 40 |
 | Thinking mode for comparison/synthesis | Complex multi-paper reasoning justified |
 | Non-thinking for fact/discovery | Speed matters, direct evidence sufficient |
+
+## Step 10d — Hybrid Retriever
+**Date:** 2026-04-04
+**Branch:** feature/step-10d-hybrid-retriever
+**Files added:**
+- `src/query/retriever.py`
+- `scripts/test_retriever.py`
+
+### Goal
+Wire all retrieval signals into one pipeline:
+SPECTER2 paper-level filtering → DuckDB hard filters →
+BM25 + BGE-M3 chunk retrieval → RRF fusion →
+section priors + metadata boosts.
+
+### Architecture
+Stage 1 — Paper candidates
+SPECTER2 FAISS → top paper_k*3 papers
+DuckDB explicit hard filters (year, journal, instrument)
+→ filtered paper pool
+Stage 2 — Chunk retrieval
+BM25 lexical → top chunk_lex_k chunks from pool
+BGE-M3 dense → top chunk_dense_k chunks from pool
+RRF fusion: score = Σ 1/(60 + rank_i)
+
+α(0.15) * section_prior
+β(0.10) * metadata_boost
+→ top rerank_k chunks
+
+
+### Scoring formula
+retrieval_score =
+rrf_score
+
+0.15 * section_prior
+0.10 * metadata_boost
+
+rrf_score = Σ 1/(60 + rank_i)  (standard k=60)
+section_prior: intent-dependent lookup (results=1.0 for fact)
+metadata_boost: +0.1 if has_numerical_result, +0.05 if has_equation
+
+### Test results
+| Query | Paper candidates | Chunks fused | Distinct papers top-5 |
+|---|---|---|---|
+| Murgia 2004 A119 spectral index | 52→40 | 205 | 4 |
+| GRF vs BxC comparison | 103→80 | 282 | 5 |
+| LOFAR after 2018 | 56→22 | 174 | 4 |
+
+Year filter correctly reduced LOFAR candidates from 56 to 22.
+Second result for Murgia query explicitly mentions
+"Murgia et al. (2004) found spectral slope q≈2" — correct.
+
+### Known limitations
+- Graph expansion stub — disabled until Step 11 populates edges
+- Section prior dominates RRF in some cases — reranker corrects
+- LOFAR query intent detected as fact not discovery — acceptable,
+  year filter still applied correctly
+
+  ## Step 10e — BGE Reranker
+**Date:** 2026-04-04
+**Branch:** feature/step-10e-reranker
+**Files added:**
+- `src/query/reranker.py`
+- `scripts/test_reranker.py`
+
+### Goal
+Cross-encoder precision reranking of top-40 retriever
+candidates. Sees query + chunk together — much more precise
+than bi-encoder similarity used in retrieval.
+
+### What was built
+**`reranker.py`** — three functions:
+- `get_reranker()` — loads BAAI/bge-reranker-v2-m3 via
+  sentence_transformers CrossEncoder, GPU, fp16, singleton
+- `rerank_chunks()` — cross-encoder scores all query-chunk
+  pairs, stores rerank_score + pre_rerank_score, sorts desc
+- `apply_diversity()` — enforces max chunks per paper and
+  minimum distinct papers, applied AFTER reranking
+- `rerank()` — orchestrates both steps
+
+### Issue encountered
+FlagEmbedding FlagReranker incompatible with transformers 5.x
+— `XLMRobertaTokenizer has no attribute prepare_for_model`.
+Fix: switched to sentence_transformers CrossEncoder which
+supports same model and is stable with transformers 5.x.
+
+### Key result — ranking correction
+For query "What spectral index n did Murgia 2004 find for A119?":
+
+| Stage | Rank 1 chunk | Score |
+|---|---|---|
+| After retrieval | arxiv:1612.01764 — spectral index at 1.38 GHz | ret=0.1718 |
+| After reranking | arxiv:0809.2411 — "Murgia et al. (2004) found spectral slope q≈2 in A119" | rerank=0.9651 |
+
+Retrieval rank 1 was wrong. Reranker corrected it to rank 6.
+The directly relevant chunk jumped from retrieval rank 2 to
+final rank 1. This is exactly the reranker's job.
+
+### Diversity results
+- 40 chunks → 8 evidence chunks from 6 distinct papers
+- max 3 chunks per paper (fact intent) enforced
+- min 2 papers requirement satisfied (6 > 2)
+
+### Design decisions
+| Decision | Reason |
+|---|---|
+| CrossEncoder over FlagReranker | Stable with transformers 5.x |
+| Diversity after reranking | Let reranker score freely first |
+| normalize=False (predict) | CrossEncoder.predict handles normalisation |
+| max 2 chunks/paper for synthesis | Forces diversity across literature |
 ## Step 11 — Query Engine
 *(Pending)*
 
