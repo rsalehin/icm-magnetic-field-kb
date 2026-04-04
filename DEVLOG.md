@@ -831,6 +831,61 @@ from GitHub.
 | Match | ✓ |
 | Index file | data/faiss/bge_chunks.index |
 | Raw matrix | data/faiss/bge_chunks_matrix.npy |
+
+## Step 10c — Query Planner
+**Date:** 2026-04-04
+**Branch:** feature/step-10c-query-planner
+**Files added:**
+- `src/query/planner.py`
+- `scripts/test_planner.py`
+
+### Goal
+Rule-based intent detection and query decomposition.
+Produces a typed contract (PlannerOutput) that downstream
+retriever, reranker, and generator consume without ambiguity.
+
+### What was built
+**`planner.py`** — typed contract + five components:
+- `detect_intent()` — pattern matching across four intent
+  classes with bias correction for edge cases
+- `extract_entities()` — named entity extraction for clusters,
+  methods, instruments, quantities, years, authors
+- `extract_explicit_filters()` — explicit-only hard constraints
+  (year range, journal, instrument when literally stated)
+- `build_soft_boosts()` — inferred preferences as additive
+  scoring hints, never hard filters
+- `plan_query()` — main entry point, returns full PlannerOutput
+
+### Typed contract output
+```json
+{
+  "intent": "comparison",
+  "entities": {"methods": ["GRF", "BxC"], "instruments": ["VLA"]},
+  "explicit_filters": {"year_min": 2011, "instrument": ["VLA"]},
+  "soft_boosts": {"sections": ["results", "discussion"]},
+  "budgets": {"paper_k": 80, "evidence_k": 12, "min_papers": 3},
+  "synthesis_mode": "thinking"
+}
+```
+
+### Bugs found and fixed
+| Bug | Fix |
+|---|---|
+| Year regex captured group (19/20) not full year | Changed to non-capturing group `(?:19\|20)` |
+| "MeerKAT papers after 2020" → fact not discovery | Added `\bpapers\s+(after\|before\|since)\b` to DISCOVERY_PATTERNS |
+| "MNRAS papers about RM" → discovery not fact | Added bias correction: journal + method/quantity → fact |
+
+### Test results
+11/11 intent detections correct after fixes.
+
+### Key design decisions
+| Decision | Reason |
+|---|---|
+| Rule-based not LLM | Microsecond latency, fully auditable |
+| Explicit vs inferred separation | Hard-filtering on inferred constraints breaks recall |
+| Intent-dependent budgets | Synthesis needs 150 papers, fact only needs 40 |
+| Thinking mode for comparison/synthesis | Complex multi-paper reasoning justified |
+| Non-thinking for fact/discovery | Speed matters, direct evidence sufficient |
 ## Step 11 — Query Engine
 *(Pending)*
 
