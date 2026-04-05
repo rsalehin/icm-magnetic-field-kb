@@ -1,862 +1,127 @@
-# ICM Magnetic Field — Knowledge Base Build Log
+# ICM Magnetic Field Knowledge Base — DEVLOG
 
-**Project:** Local hybrid knowledge graph over the intracluster medium (ICM)
-magnetic field literature, supporting structured, semantic, and graph-hop queries.
-
-**Repository:** `C:\Users\rsalehin\OneDrive\Desktop\Projects\TLS\Papers\Knowledge_Base`
-
-**Author:** Abir (Rafiqus Salehin)
-**Started:** 2026-04-03
+**Project:** icm-magnetic-field-kb  
+**Location:** `C:\Users\rsalehin\OneDrive\Desktop\Projects\TLS\Papers\Knowledge_Base`  
+**GitHub:** https://github.com/rsalehin/icm-magnetic-field-kb (private)  
+**Stack:** Python 3.12, PyTorch + CUDA, RTX 5070 Ti (17GB), 67.8GB RAM, Windows 11
 
 ---
 
 ## Architecture Overview
 
-A three-backend local system, fully offline:
-
 ```
-PDFs
-  ↓
-PyMuPDF / pdfplumber     → text extraction + chunking
-  ↓
-SPECTER2 on GPU          → scientific embeddings
-  ↓
-  ├── FAISS (CPU)        → dense vector search (semantic queries)
-  ├── DuckDB             → structured SQL (metadata + extracted quantities)
-  └── NetworkX           → citation graph (relational + graph-hop queries)
-```
+papers/ (251 PDFs)
+    ↓
+Stage A — PDF extraction + chunking (pdfplumber, text_cleaner)
+Stage B — ADS API enrichment (bibcode, citation count, authors)
+Stage C — SPECTER2 GPU embedding (768-dim, 58,077 vectors)
+Stage D — DuckDB + FAISS + NetworkX storage
 
-## Motivation & Design Philosophy
+Query Engine:
+Query → Planner → Retriever (SPECTER2+BM25+BGE-M3+RRF+Graph)
+      → Reranker (BGE-reranker-v2-m3)
+      → Assembler (dedup, conflict detection, abstention)
+      → Generator (DeepSeek V3.2 API / Qwen3:14b fallback)
+      → Grounded answer with citations
 
-**Date added:** 2026-04-04
-
-### Why build this instead of using existing tools?
-
-This section documents the reasoning behind building a custom knowledge
-base rather than using off-the-shelf solutions. Written at Step 6,
-after the core architecture was established.
-
-### Existing tools considered
-
-| Tool | What it does well | Why it was insufficient |
-|---|---|---|
-| NotebookLM (Google) | PDF Q&A, cited answers, clean UI | Cloud-only, 50 paper limit, no graph, no SQL, no domain tuning |
-| Elicit / Consensus | Literature Q&A | Public corpus only, cannot add own papers, no graph |
-| ResearchRabbit | Citation graph visualisation | No text retrieval, no Q&A, visual only |
-| Zotero + plugins | Reference management | No semantic search, no graph queries |
-| Claude / ChatGPT | Q&A over uploaded PDFs | Context window limits, no persistence, no graph traversal |
-| LlamaIndex / LangChain | Framework-level RAG | Shallow graph, no domain chunking, no structured extraction |
-
-### What this system does that no existing tool does
-
-**Graph-hop queries**
-No existing tool supports queries like:
-- *"Trace the methodological lineage from Tribble 1991 through
-  Murgia 2004 to present day"*
-- *"What did papers that cited Murgia 2004 conclude about the
-  magnetic field power spectrum slope?"*
-- *"Which papers use both GRF simulation AND compare against
-  the analytical single-scale model?"*
-
-These require traversing the citation graph while simultaneously
-retrieving grounded text — a qualitatively different query type
-that vector search alone cannot support.
-
-**Structured domain extraction (Layer 3)**
-Storing extracted physical quantities as SQL — σ_RM values,
-spectral indices n, central field strengths B₀, cluster names,
-field models used — enables queries like:
-- *"Which papers report B₀ > 5 µG in non-cooling-flow clusters?"*
-- *"Show all papers that study A119 using RM structure functions"*
-
-This is a database query, not a fuzzy semantic search. The
-precision difference is significant for scientific work.
-
-**Domain-specific embeddings**
-SPECTER2 was trained on 146 million scientific citation pairs.
-It understands that "σ_RM", "rotation measure dispersion", and
-"RM scatter" refer to the same concept. General-purpose models
-used by NotebookLM and ChatGPT treat these as loosely related.
-For astrophysics text with heavy notation, the retrieval accuracy
-difference is substantial.
-
-**Full ownership and privacy**
-The entire system runs locally on the research workstation.
-No paper content, no query history, no extracted knowledge
-leaves the machine. This matters for unpublished results and
-pre-submission work.
-
-**Incremental and persistent**
-The system grows with the research. Drop a new PDF in the
-`papers/` folder, re-run the pipeline — only the new paper
-is processed. All prior ingestion is preserved. No existing
-cloud tool offers this with full control over the pipeline.
-
-### When existing tools are better
-
-This system is not always the right choice. For simple queries
-over a small number of papers, NotebookLM or Claude with an
-uploaded PDF is faster and easier. This system becomes strictly
-better when:
-
-- Queries span more than 10 papers simultaneously
-- Relational queries are needed (which papers, which clusters,
-  which methods, which quantities)
-- Citation graph traversal is required
-- Privacy and offline operation matter
-- The corpus will grow incrementally over time
-- GNN analysis of the citation network is a future goal
-
-All five conditions apply to this project.
-
-### Research context
-
-This knowledge base is built specifically for research on
-turbulent magnetic fields in galaxy clusters at
-Karl-Schwarzschild-Observatorium Tautenburg. The corpus covers
-30 years of ICM magnetic field literature (1995–2026, 251 papers)
-spanning:
-- Faraday rotation measure (RM) observations
-- GRF and BxC/Biot-Savart magnetic field models
-- MHD cosmological simulations
-- Depolarization studies
-- Radio halo morphology
-
-The structured extraction vocabulary (GRF, BxC, σ_RM, β-model,
-Λ_min, Λ_max, spectral index n) is domain-specific and would
-be missed entirely by general-purpose tools.
-
-### Long-term vision
-
-Beyond literature search, the graph structure and node features
-(Layer 4) are designed to support:
-- GNN-based paper recommendation
-- Automated detection of methodological lineages
-- Community detection within the citation graph
-- Identification of contradicting claims across papers
-- Semi-automated literature review generation
-
-The schema was designed with these use cases in mind from the
-start — not retrofitted later.
-
-### Why this stack
-- **FAISS over Qdrant/Weaviate:** corpus is bounded (~200–500 papers, ~20k chunks);
-  no Docker daemon needed; CPU FAISS is fast enough at this scale.
-- **DuckDB over SQLite:** columnar, faster analytical queries, native Python,
-  no server process.
-- **NetworkX over Neo4j:** graph fits in RAM (500 nodes); no JVM overhead;
-  full Python API for custom traversal logic.
-- **SPECTER2 over general embeddings:** trained on 146M scientific citation pairs;
-  understands domain vocabulary (σ_RM, beta-model, Faraday rotation) out of the box.
-
-### Paper node schema
-Four-layer JSON structure per paper:
-- **Layer 1:** Bibliographic metadata (from NASA ADS)
-- **Layer 2:** Paragraph-level chunks with section context + embeddings
-- **Layer 3:** LLM-extracted structured knowledge (methods, quantities,
-  claims, datasets, physical domain vocabulary)
-- **Layer 4:** Graph topology features (edges, node features for GNN)
-
-Schema file: `paper_node_schema.json`
-
----
-
-## Step 1 — Environment Diagnostic
-**Date:** 2026-04-03
-**Script:** `step1_env_check.py`
-
-### What we did
-Ran a diagnostic script to check Python version, GPU, RAM, and which
-required packages were already installed before touching anything.
-
-### Output
-```
-Python : 3.12.10 [MSC v.1943 64 bit (AMD64)]
-OS     : Windows-11-10.0.26200-SP0
-
-GPU    : NVIDIA GeForce RTX 5070 Ti  |  VRAM: 17.1 GB
-CUDA   : 13.0 (dev PyTorch build 2.12.0.dev20260304+cu130)
-
-RAM Total     : 67.8 GB
-RAM Available : 53.1 GB
-
-✓ networkx   3.6.1
-✓ requests   2.33.0
-✓ tqdm       4.67.1
-✗ faiss, duckdb, sentence_transformers, transformers, pdfplumber, pymupdf
-```
-
-### Key decisions made
-| Decision | Reason |
-|---|---|
-| Use `faiss-cpu` not `faiss-gpu` | Blackwell (sm_120) not yet supported in faiss-gpu PyPI builds |
-| Use PyTorch nightly cu130 | Only build with sm_120 support for RTX 5070 Ti |
-| SPECTER2 as embedding model | Scientific paper training corpus; understands physics vocabulary |
-| CPU FAISS sufficient | ~500 papers → ~20k chunks; fits easily in 67 GB RAM |
-
----
-
-## Step 2 — Virtual Environment + Stack Installation
-**Date:** 2026-04-03
-
-### What we did
-Created an isolated virtual environment to protect the global Python
-installation, then installed all required packages inside it.
-
-### Why a venv
-Global Python was at `C:\Users\rsalehin\AppData\Local\Programs\Python\Python312`
-(no environment active). Installing globally risked overwriting the
-dev PyTorch cu130 build. Venv keeps everything isolated — delete the
-folder to start over with zero damage.
-
-### Commands run
-```powershell
-# PowerShell execution policy (one-time fix)
-Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
-
-# Create and activate venv
-cd C:\Users\rsalehin\OneDrive\Desktop\Projects\TLS\Papers\Knowledge_Base
-python -m venv .venv
-.venv\Scripts\Activate.ps1
-
-# Core data layer
-pip install duckdb faiss-cpu
-
-# ML stack (--no-deps protects existing PyTorch install)
-pip install sentence-transformers --no-deps
-pip install transformers tokenizers huggingface-hub safetensors accelerate numpy scipy scikit-learn
-
-# PDF parsers
-pip install pymupdf pdfplumber
-
-# PyTorch — cu124 stable first attempt (failed: sm_120 warning)
-pip install torch --index-url https://download.pytorch.org/whl/cu124
-# ↑ Gave UserWarning: sm_120 not compatible. Uninstalled and switched.
-
-# PyTorch — nightly cu130 (correct build for RTX 5070 Ti)
-pip uninstall torch torchvision -y
-pip install --pre torch torchvision --index-url https://download.pytorch.org/whl/nightly/cu130
-```
-
-### Issue encountered
-`cu124` stable PyTorch installed cleanly but emitted:
-```
-UserWarning: NVIDIA GeForce RTX 5070 Ti with CUDA capability sm_120
-is not compatible with the current PyTorch installation.
-The current PyTorch install supports CUDA capabilities sm_50 sm_60
-sm_61 sm_70 sm_75 sm_80 sm_86 sm_90.
-```
-**Fix:** Switched to nightly `cu130` build which includes sm_120 support.
-
-### Verified stack (`step2_verify.py` output)
-```
-✓ duckdb                    1.5.1
-✓ faiss                     1.13.2
-✓ networkx                  3.6.1
-✓ sentence_transformers     5.3.0
-✓ transformers              5.5.0
-✓ fitz (pymupdf)            1.27.2.2
-✓ pdfplumber                0.11.9
-
-torch : 2.12.0.dev20260403+cu130  |  CUDA: True
-GPU   : NVIDIA GeForce RTX 5070 Ti
+Frontend:
+FastAPI server → index.html (Chat + Graph + Stats tabs)
+Chrome Extension → auto-inject prompts into Claude/ChatGPT/Gemini
 ```
 
 ---
 
-## Step 3 — Embedding Model Verification
-**Date:** 2026-04-03
-**Script:** `step3_embedding_check.py`
+## Step 1 — PDF Ingestion Pipeline (Stage A)
 
-VRAM: 0.47 GB | Encoding: 6.5 it/s | Shape: (3, 768)
-Warnings: symlinks (harmless), position_ids unexpected (harmless)
+**Files:** `src/extraction/pdf_extractor.py`, `src/extraction/text_cleaner.py`
 
-### What we did
-Verified that sentence-transformers correctly dispatches SPECTER2
-to the RTX 5070 Ti GPU, not CPU. First run downloads ~500 MB of
-model weights to `C:\Users\rsalehin\.cache\huggingface\hub`.
-
-### Output
-```
-[paste output here]
-```
-
-### Result
-- [ ] GPU confirmed / CPU fallback (circle one after running)
+- PDF → section-aware chunks using pdfplumber
+- Content flags: `has_equation`, `has_table`, `has_numerical_result`, `has_figure_ref`
+- Context window: `prev_chunk_id`, `next_chunk_id`, `section_summary`
+- Noise filtering: chunks < 30 tokens marked `is_noise = TRUE`
+- 251 papers → 58,077 non-noise chunks
 
 ---
 
-## Step 4 — PDF Text Extraction (Stage A)
-**Date:** 2026-04-04
-**Branch:** feature/step-04-pdf-extraction
-**Files added:**
-- `src/extraction/pdf_extractor.py`
-- `src/extraction/text_cleaner.py`
-- `src/extraction/__init__.py`
-- `src/__init__.py`
-- `scripts/test_extractor.py`
-- `scripts/test_extractor2.py`
-- `scripts/test_batch_small.py`
-- `scripts/diagnose_pdf.py`
+## Step 2 — ADS Enrichment (Stage B)
 
-### Goal
-Build Stage A of the ingestion pipeline: take a raw PDF file and
-produce a structured Python dict matching Layer 1 (partial) + Layer 2
-of the paper node schema. Purely local — no network calls.
+**Files:** `src/enrichment/ads_enricher.py`
 
-### What was built
-**`pdf_extractor.py`** — main extractor:
-- Parses arxiv_id and year from filename (handles both old-style
-  `astro-ph_0406225` and new-style `0905.3552` formats)
-- Opens PDF with PyMuPDF, iterates page by page
-- Calls text_cleaner per page, then splits into paragraph chunks
-- Detects section boundaries line by line
-- Attaches content flags per chunk (has_equation, has_table,
-  has_figure_ref, has_numerical_result)
-- Runs a post-pass to fix next_chunk_id and attach section summaries
-- Returns a fully structured dict ready for storage
-
-**`text_cleaner.py`** — page-level boilerplate removal + paragraph splitting:
-- Strips arXiv stamps, journal headers, running headers, affiliation
-  lines, email lines, manuscript lines, standalone numbers
-- Joins soft-wrapped lines back into full sentences (arXiv PDFs wrap
-  at ~80 chars with no blank line)
-- Handles hyphenated word breaks (removes hyphen, joins without space)
-- Splits into paragraphs: blank-line boundaries first, then sentence
-  boundary heuristic for large blocks (>400 chars)
-- min_chars=150 filter removes noise fragments
-
-### Problems encountered and fixes
-
-**Problem 1 — Only 19 chunks for a 19-page paper (one chunk per page)**
-Root cause: arXiv PDFs use single `\n` between paragraphs, not `\n\n`.
-The original splitter used `re.split(r"\n\s*\n")` which found no splits.
-Fix: added `join_soft_wrapped_lines()` to first reconstruct full
-sentences from wrapped lines, then applied a sentence-boundary
-heuristic splitter for large blocks.
-Result: 19 chunks → 236 chunks for Murgia 2004.
-
-**Problem 2 — Running page headers not stripped**
-Root cause: Pattern `^\d{1,3}\n[A-Z]...` expected a page number
-before the header, but A&A papers format it as `\nAuthor et al.: Title\n`
-without a preceding digit on the same match.
-Fix: broadened RUNNING_HEADER pattern to `^[A-Z][^\n]{5,80}et al\.`.
-Result: Page 3 went from 1 paragraph to 20 paragraphs.
-
-**Problem 3 — Equation fragments detected as section headings**
-Symptom: `'1.4 GHz = (0.393 ± 0.002) ·'` appearing in sections list.
-Root cause: Section pattern `^\d+\.?\d*` was too loose — matched any
-line starting with a number.
-Fix: added hard rejection rules to `detect_section()` — lines
-containing `=`, `±`, `·`, `×` or decimal numbers rejected immediately.
-Also tightened SECTION_PATTERNS to require `[a-zA-Z\s]{3,50}` after
-the section number.
-Result: False sections eliminated across all tested papers.
-
-**Problem 4 — Affiliation lines leaking into first chunks**
-Symptom: `"Poggio dei Pini, I-09012 Capoterra..."` appearing as chunk text.
-Root cause: AFFILIATION pattern only matched lines ending in country
-names — missed institution names like INAF, NRAO, MPIfR.
-Fix: extended AFFILIATION pattern to also match Observatory, Institute,
-University, Universit, Dipartimento, INAF, CNRS, MPIfR, NRAO, ESO.
-Also added EMAIL_LINE and CORRESPONDENCE_LINE patterns.
-
-**Problem 5 — min_chars too low (80) letting noise through**
-Symptom: 15–37 noise chunks under 30 tokens per paper.
-Fix: raised min_chars from 80 to 150.
-Residual noise (5–20 chunks per paper) is equation fragments that
-survive cleaning — these are flagged at query time rather than
-discarded, preserving equation content.
-
-### Final test results (5-paper batch)
-
-| Paper | Pages | Chunks | Avg tokens | Noise |
-|---|---|---|---|---|
-| 1999_Feretti | 30 | 183 | 47 | 10 |
-| 2004_Murgia | 19 | 236 | 47 | 15 |
-| 2012_Vacca | 17 | 193 | 47 | 11 |
-| 2019_Loi | 10 | 116 | 50 | 5 |
-| 2024_Vacca | 12 | 177 | 46 | 20 |
-
-All 5 papers: zero failures, consistent ~47 tokens/chunk average.
-
-### Key decisions made
-
-| Decision | Reason |
-|---|---|
-| Stage A purely local (no ADS calls) | Isolates failure modes — network issues can't stall PDF parsing |
-| Paragraph-level chunks (~47 tokens) | Balance between retrieval precision and context; sentence-level too small, page-level too large |
-| min_chars=150 not higher | Preserves short but meaningful equation-context chunks |
-| Noise chunks kept, not deleted | Equation fragments have retrieval value; filtered at query time |
-| Sentence-boundary heuristic only on blocks >400 chars | Avoids over-splitting naturally short paragraphs |
-| Section detection rejects lines with math symbols | Equation-rich lines are structurally identical to headings at regex level |
-
-### What Stage A does NOT do
-- Does not call ADS API (Stage B)
-- Does not generate embeddings (Stage C)
-- Does not extract structured knowledge from Layer 3 (Stage D)
-- Does not write to DuckDB, FAISS, or NetworkX (Stage D)
-
-### Known limitations
-- Section titles that span two lines are truncated at the first line
-  e.g. `"2. Faraday rotation in clusters of galaxies and the"` — the
-  second line `"FARADAY tool"` is lost. Acceptable for now.
-- Residual noise from inline equations rendered as isolated text
-  blocks by PyMuPDF — these survive all cleaning passes.
-- Papers with two-column layouts may have occasional merge artifacts
-  where columns are concatenated mid-sentence.
+- NASA ADS API: bibcode, DOI, citation count, journal, authors, keywords
+- Token in `.env` as `ADS_TOKEN`
+- Idempotent: skips already-enriched papers
 
 ---
 
-## Step 5 — ADS Metadata Enrichment (Stage B)
-**Date:** 2026-04-04
-**Branch:** feature/step-05-ads-enrichment
-**Files added:**
-- `src/enrichment/__init__.py`
-- `src/enrichment/ads_enricher.py`
-- `scripts/test_ads_enricher.py`
+## Step 3 — SPECTER2 Embeddings (Stage C)
 
-### Goal
-Fill in Layer 1 bibliographic fields (title, authors, journal, DOI,
-abstract, citation count, bibcode) by querying the NASA ADS API
-using the arxiv_id derived from the filename in Stage A.
+**Files:** `src/storage/faiss_index.py`, `src/pipeline.py`
 
-### What was built
-**`ads_enricher.py`**:
-- Loads ADS token from `.env` via python-dotenv
-- `enrich_from_arxiv_id()` — queries ADS search endpoint,
-  handles both old-style (astro-ph/0406225) and new-style
-  (0905.3552) arxiv IDs
-- Fallback: if primary query fails, retries with identifier field
-- Extracts DOI from identifier list (starts with "10.")
-- `enrich_paper()` — takes Stage A dict, merges ADS data into
-  Layer 1, updates meta.stage_b status, respects rate limit
-  via 0.3s sleep between calls
-
-### Design decisions
-| Decision | Reason |
-|---|---|
-| ADS token in `.env` not source code | Never expose credentials in git |
-| 0.3s sleep between calls | ADS rate limit ~5000/day unauthenticated, polite crawling |
-| Merge strategy: existing fields preserved | pdf_path and total_pages from Stage A must not be overwritten |
-| stage_b = "failed" not exception | Pipeline continues on ADS miss; paper still usable with Stage A data |
-
-### Test results
-| Paper | Bibcode | Citations | stage_b |
-|---|---|---|---|
-| Murgia 2004 | 2004A&A...424..429M | 255 | done |
-| Bonafede 2009 | 2009A&A...503..707B | 129 | done |
-| Loi 2019 | 2019MNRAS.485.5285L | 16 | done |
-
-All 3 resolved correctly. Zero failures.
-
-### Known limitations
-- ADS occasionally returns arXiv DOI (10.48550/arXiv.XXX) instead
-  of journal DOI — happens when journal has not yet registered DOI
-  with ADS. Acceptable for now.
-- No retry logic on network timeout — will add in pipeline manager.
+- Model: `allenai/specter2_base` (768-dim)
+- GPU encoding, batch size 64
+- 58,077 vectors in `data/faiss/chunks.index`
+- ID map: `data/faiss/chunks_id_map.json`
 
 ---
 
-## Step 6 — DuckDB Schema Initialisation
-**Date:** 2026-04-04
-**Branch:** feature/step-06-duckdb-schema
-**Files added:**
-- `src/storage/__init__.py`
-- `src/storage/db.py`
-- `scripts/test_duckdb.py`
-- `scripts/test_duckdb_idempotent.py`
+## Step 4 — DuckDB + NetworkX Storage (Stage D)
 
-### Goal
-Set up the persistent structured storage layer. DuckDB holds
-Layer 1 bibliographic metadata, normalised authors, Layer 2
-chunks with all content flags, and ingestion state tracking
-per paper across all four pipeline stages.
+**Files:** `src/storage/db.py`, `src/storage/graph.py`
 
-### What was built
-**`db.py`** — four functions:
-- `get_connection()` — opens/creates DuckDB file, creates
-  parent directory if needed
-- `init_schema()` — creates four tables if not exist:
-  `papers`, `authors`, `chunks`, `ingestion_state`
-- `insert_paper()` — takes Stage A+B dict, inserts into all
-  four tables atomically, idempotent (skips if node_id exists)
-- `get_ingestion_state()` — returns pipeline progress for all
-  papers as list of dicts
+**DuckDB tables:**
+- `papers` — bibliographic metadata
+- `authors` — normalised author list
+- `chunks` — 58,077 chunk records with content flags
+- `ingestion_state` — pipeline progress per paper
+- `paper_extractions` — Layer 3 structured extraction (JSON)
 
-### Schema design decisions
-| Decision | Reason |
-|---|---|
-| Four separate tables | Normalisation — authors queried independently of chunks |
-| JSON arrays as VARCHAR | keywords, sections, figure_refs don't need SQL querying; avoids complexity of array types |
-| is_noise flag on chunks | Noise chunks preserved for equation content but excluded from embedding |
-| ingestion_state separate table | Single source of truth for pipeline progress — survives paper re-ingestion |
-| INSERT OR REPLACE on ingestion_state | State always reflects latest run |
-| Idempotent insert | Safe to re-run pipeline on same paper — no duplicates |
-
-### Test results
-| Check | Result |
-|---|---|
-| Schema init | ✓ |
-| Paper insert (Murgia 2004) | ✓ 236 chunks, 5 authors |
-| Noise flagging | ✓ chunks < 30 tokens correctly marked |
-| Second insert skips | ✓ "Already in DB, skipping" |
-| Row counts after double insert | ✓ 1 paper, 236 chunks |
-
-### Known limitations
-- Layer 3 structured extraction not yet stored — will add
-  JSON column to papers table in Step 10
-- No index on chunks.node_id yet — will add before full
-  corpus ingestion in Step 9
-- authors table uses position integer as part of PK —
-  sufficient for read queries but not for fuzzy author search
+**NetworkX graph:** `data/graph/citation_graph.graphml`
+Populated in Step 11.
 
 ---
 
-## Step 7 — FAISS Index Initialisation
-**Date:** 2026-04-04
-**Branch:** feature/step-07-faiss-index
-**Files added:**
-- `src/storage/faiss_index.py`
-- `scripts/test_faiss.py`
+## Step 5 — Ingestion Orchestrator
 
-### Goal
-Set up the vector storage layer. FAISS IndexFlatIP holds
-SPECTER2 embeddings for all non-noise chunks. Supports
-incremental addition of new vectors and exact cosine
-similarity search.
+**Files:** `src/pipeline.py`, `scripts/ingest_all.py`
 
-### What was built
-**`faiss_index.py`** — six functions:
-- `get_or_create_index()` — loads existing index from disk
-  or creates new IndexFlatIP (dim=768)
-- `load_id_map()` — loads chunk_id → faiss_row mapping from
-  JSON file
-- `save_id_map()` — persists id_map to disk
-- `save_index()` — writes FAISS index to disk
-- `add_embeddings()` — adds batch of vectors, normalises to
-  unit length, skips already-indexed chunks (idempotent)
-- `search()` — searches index for top-k nearest neighbours,
-  returns list of {chunk_id, score, faiss_row} dicts
-- `get_index_stats()` — summary stats for current index
-
-### Design decisions
-| Decision | Reason |
-|---|---|
-| IndexFlatIP not IndexIVFFlat | Exact search — no approximation error; corpus (~20k chunks) well within exact search range |
-| Cosine via inner product | Normalise vectors to unit length first, then inner product = cosine similarity |
-| Separate id_map JSON | FAISS only stores row indices — need external chunk_id mapping for retrieval |
-| CPU FAISS | Blackwell sm_120 unsupported in faiss-gpu; 20k vectors trivially fast on CPU |
-| GPU used upstream | Embedding generation (Stage C) uses RTX 5070 Ti; FAISS only does lookup |
-| Idempotent add | Skip already-indexed chunks — safe to re-run pipeline |
-
-### Test results
-| Check | Result |
-|---|---|
-| Index creation | ✓ dim=768 IndexFlatIP |
-| Add 10 vectors | ✓ |
-| Idempotency (skip duplicates) | ✓ |
-| Add 5 more incremental | ✓ 15 total |
-| Search top hit | ✓ c0000 score=1.0000 exact match |
-| Persist and reload | ✓ 15 vectors restored from disk |
-
-### Known limitations
-- Vectors not yet populated with real SPECTER2 embeddings —
-  tested with synthetic random vectors; real embeddings added
-  in Step 9
-- No FAISS GPU index — faiss-gpu does not support Blackwell
-  sm_120; CPU index sufficient at current scale
-- id_map loaded fully into RAM — fine for 20k chunks,
-  revisit if corpus grows beyond 500k vectors
----
-
-## Step 8 — NetworkX Citation Graph
-**Date:** 2026-04-04
-**Branch:** feature/step-08-networkx-graph
-**Files added:**
-- `src/storage/graph.py`
-- `scripts/test_graph.py`
-
-### Goal
-Set up the graph storage layer. NetworkX DiGraph holds papers
-as nodes and citation relationships as directed typed edges.
-Persists to disk as GraphML between sessions.
-
-### What was built
-**`graph.py`** — six functions:
-- `get_or_create_graph()` — loads GraphML from disk or creates
-  new DiGraph
-- `save_graph()` — persists to GraphML
-- `add_paper_node()` — adds paper with Layer 1 attributes as
-  node attributes; idempotent
-- `add_citation_edges()` — adds directed edges with citation_role
-  and context_chunk_id; creates stub nodes for cited papers not
-  yet ingested
-- `mark_seed()` — flags seed papers in graph
-- `get_neighbors()` — returns in/out neighbors with edge
-  attributes; supports direction='in', 'out', 'both'
-- `get_graph_stats()` — summary stats including year range
-  and seed count
-
-### Design decisions
-| Decision | Reason |
-|---|---|
-| DiGraph not Graph | Citations are directed — A cites B ≠ B cites A |
-| GraphML format | Human-readable XML, NetworkX native, survives version changes |
-| Stub nodes for uncrawled refs | Graph stays consistent even when target paper not yet ingested |
-| citation_role on edges | Enables filtering by relationship type — foundational vs methodological vs incidental |
-| context_chunk_id on edges | Traces exactly which chunk contains the citation |
-| is_seed flag on nodes | Needed for graph traversal strategies that start from seeds |
-
-### Test results
-| Check | Result |
-|---|---|
-| Graph creation | ✓ |
-| 2 full nodes + 1 stub | ✓ |
-| Directed edges with roles | ✓ methodological + foundational |
-| Neighbour traversal | ✓ |
-| Persist and reload | ✓ 3 nodes, 2 edges |
-
-### Known limitations
-- Citation edges currently added manually with synthetic data —
-  real citation extraction from ADS happens in Step 9
-- GraphML loads entire graph into RAM — fine for 251 papers,
-  revisit if corpus grows beyond ~5000 nodes
-- No community detection or graph metrics computed yet —
-  planned for Step 11
----
-
-## Step 9 — Full Single-Paper Ingestion Pipeline
-**Date:** 2026-04-04
-**Branch:** feature/step-09-ingestion-pipeline
-**Files added:**
-- `src/pipeline.py`
-- `scripts/test_pipeline_single.py`
-
-### Goal
-Wire all four stages into a single end-to-end pipeline function
-that takes a PDF path and writes to all three backends atomically.
-First milestone where the full system runs together.
-
-### What was built
-**`pipeline.py`** — four components:
-- `get_model()` — loads SPECTER2 onto GPU once, reuses across
-  papers via module-level singleton
-- `embed_chunks()` — Stage C: generates embeddings for all
-  non-noise chunks (token_count >= 30), batch size 64, GPU
-- `write_to_storage()` — Stage D: writes to DuckDB, FAISS,
-  NetworkX in sequence; updates faiss_index_id in DuckDB
-  after FAISS write; marks stage_d = done in DB
-- `ingest_paper()` — orchestrates A→B→C→D; checks DuckDB
-  first and skips if already fully ingested
-
-### Performance
-- SPECTER2 load time : ~15s (cached after first run)
-- Per-paper time     : ~3.1s (GPU embedding dominant)
-- Full corpus (251)  : ~13 minutes estimated
-- Noise skipped      : 15/236 chunks for Murgia 2004
-
-### Bug found and fixed
-stage_d was showing 'pending'
+- Orchestrates Stages A→B→C→D
+- Idempotent — resumable on crash
+- 251/251 papers, 16.8 min, 0 failures
 
 ---
-## Step 9b — Batch Ingestion Runner
-**Date:** 2026-04-04
-**Branch:** feature/step-09b-batch-ingestion
-**Files added:**
-- `scripts/ingest_all.py`
 
-### Goal
-Process all 251 PDFs through the full pipeline in one run.
-Resumable, fault-tolerant, with progress bar and log file.
-
-### What was built
-**`ingest_all.py`** — batch runner with:
-- `--limit N` flag for test runs on first N papers
-- `--skip-ads` flag for offline testing
-- tqdm progress bar per paper
-- saves all three backends after every paper — no data
-  loss on crash or interrupt
-- timestamped log file at `data/ingestion_log.txt`
-- full summary on completion
-
-### Full corpus results
-| Metric | Result |
-|---|---|
-| Papers processed | 251/251 |
-| Papers failed | 0 |
-| Total time | 16.8 minutes |
-| Avg per paper | ~4s |
-| FAISS vectors | 58,077 |
-| Graph nodes | 251 |
-| DuckDB rows | 251 papers, ~58k chunks |
-
-### Test methodology
-- Ran with `--limit 5` first — verified 5/5 clean
-- Then ran full corpus — 251/251 clean
-- Confirmed resumability: 5 pre-ingested papers
-  correctly skipped on full run
-
-### Known limitations
-- Graph edges = 0 — citation edge extraction from
-  ADS references endpoint planned for Step 11
-- ADS called for every paper even on resume — will
-  add local cache in future
-- No parallel processing — sequential by design to
-  respect ADS rate limits; GPU is the bottleneck
-  anyway at ~4s/paper
 ## Step 10a — BM25 Lexical Index
-**Date:** 2026-04-04
-**Branch:** feature/step-10a-bm25-index
-**Files added:**
-- `src/query/__init__.py`
-- `src/query/bm25_index.py`
-- `scripts/test_bm25.py`
 
-### Goal
-Build sparse lexical retrieval index over all 58,077 chunks
-plus 251 abstracts. Handles exact scientific term retrieval
-that dense SPECTER2 embeddings miss (σ_RM, Burn law, LOFAR,
-BxC, Briggs weighting).
+**Files:** `src/query/bm25_index.py`, `scripts/test_bm25.py`
 
-### What was built
-**`bm25_index.py`** — five components:
-- `tokenise()` — scientific tokeniser preserving Greek letters,
-  subscripts, telescope acronyms, method names
-- `build_weighted_text()` — section_title repeated 2x +
-  chunk_text + keywords for weighted field
-- `build_corpus_from_db()` — pulls non-noise chunks from
-  DuckDB, writes JSONL canonical store; also extracts
-  abstracts as special documents with title repeated 3x
-- `build_bm25_index()` — builds BM25Okapi from JSONL,
-  saves pickle cache
-- `bm25_search()` — searches with optional node_id filter
-  to restrict to paper pool from Stage 1 retrieval
+- Scientific tokeniser preserving Greek letters, subscripts, telescope acronyms
+- Corpus: 58,077 chunks + 251 abstracts = 58,328 documents
+- Section-weighted: title 3x, section 2x
+- Cache: `data/bm25/bm25_index.pkl`
+- node_id filter enables paper-pool restriction
 
-### Design decisions
-| Decision | Reason |
-|---|---|
-| JSONL as canonical store | Reproducible, version-safe, DuckDB-independent |
-| Pickle as cache artifact | Fast load at query time, regeneratable |
-| Abstracts as separate boosted docs | Higher signal for discovery queries |
-| Title 3x, section 2x repetition | Simple weighted field without schema changes |
-| node_id filter in search | Enables chunk-phase restriction to paper pool |
-| Scientific tokeniser | Preserves σ_RM, beta-model, LOFAR, MeerKAT exactly |
-
-### Test results
-| Query | Top result | Correct? |
-|---|---|---|
-| Burn law depolarization sigma_RM | arxiv:1002.0811 — depolarization section | ✓ |
-| Gaussian random field power spectrum | arxiv:2507.22006 — turbulent magnetic sim | ✓ |
-| Faraday rotation intracluster magnetic field | astro-ph/0505144 — RM diagnostics | ✓ |
-| LOFAR observations galaxy cluster | arxiv:2201.12207 — LOFAR 144MHz | ✓ |
-| BxC Biot-Savart convolution | arxiv:1711.03252 — deep learning paper | ✗ |
-
-### Known limitation
-BxC query returned off-topic results — "convolution" and
-"field" match deep learning papers. This is expected BM25
-behaviour on a broad corpus. Fixed by paper-pool restriction:
-SPECTER2 paper filtering in Step 10d removes off-topic papers
-before BM25 runs on the remaining pool.
-
-### Corpus stats
-- Chunk documents : 58,077
-- Abstract docs   : 251
-- Total indexed   : 58,328
-- Build time      : <1 second
-- Cache size      : ~200MB
-
+---
 
 ## Step 10b — BGE-M3 Chunk Embeddings
-**Date:** 2026-04-04
-**Branch:** feature/step-10b-bge-embeddings
-**Files added:**
-- `src/query/bge_embedder.py`
-- `scripts/test_bge.py`
-- `scripts/build_bge_index.py`
 
-### Goal
-Build second dense index for chunk-level evidence retrieval.
-BGE-M3 is better than SPECTER2 for exact chunk retrieval —
-SPECTER2 handles paper-level similarity, BGE-M3 handles
-precise evidence grounding.
+**Files:** `src/query/bge_embedder.py`, `scripts/build_bge_index.py`
 
-### What was built
-**`bge_embedder.py`** — eight functions:
-- `get_bge_model()` — loads BAAI/bge-m3 on GPU, fp16,
-  singleton pattern
-- `get_or_create_bge_index()` — loads/creates IndexFlatIP
-  dim=1024
-- `load_bge_id_map()` / `save_bge_id_map()` — chunk_id →
-  bge_faiss_row mapping
-- `embed_chunks_bge()` — document-side embedding, no prefix,
-  normalised to unit length
-- `embed_query_bge()` — query-side embedding with asymmetric
-  instruction prefix
-- `build_bge_index_from_db()` — pulls all non-noise chunks
-  from DuckDB, embeds in batches, saves FAISS + id_map +
-  raw numpy matrix; resumable
-- `bge_search()` — searches with optional node_id filter
+- Model: `BAAI/bge-m3` (1024-dim), fp16, GPU
+- Asymmetric retrieval: query prefix applied on query side only
+- 58,077 vectors in `data/faiss/bge_chunks.index`
+- Raw matrix: `data/faiss/bge_chunks_matrix.npy` (used for dedup)
+- Resumable build
 
-### Design decisions
-| Decision | Reason |
-|---|---|
-| Separate from SPECTER2 index | Different roles — paper vs chunk retrieval |
-| fp16 precision | Halves VRAM usage, negligible quality loss |
-| Asymmetric prefix on query | BGE-M3 explicitly designed for this |
-| Raw matrix saved as .npy | Enables offline rescoring, clustering, debugging |
-| Resumable embedding | Safe to interrupt and restart |
-| node_id filter in search | Restricts to paper pool from Stage 1 |
+**Issue fixed:** FlagEmbedding 1.3.5 incompatible with transformers 5.x.
+Fixed by upgrading FlagEmbedding from source.
 
-### Issue encountered
-FlagEmbedding 1.3.5 incompatible with transformers 5.5.0 —
-`is_torch_fx_available` removed in transformers 5.x.
-Fix: upgraded FlagEmbedding from source via pip install
-from GitHub.
-
-### Test results (100-chunk sample)
-| Check | Result |
-|---|---|
-| Shape | ✓ (100, 1024) |
-| All norms = 1.0 | ✓ |
-| Search relevance | ✓ power law magnetic field chunk top hit |
-| Asymmetric prefix | ✓ changes similarity score |
-
-### Full corpus results
-| Metric | Value |
-|---|---|
-| Chunks embedded | 58,077 |
-| FAISS vectors | 58,077 |
-| ID map entries | 58,077 |
-| Match | ✓ |
-| Index file | data/faiss/bge_chunks.index |
-| Raw matrix | data/faiss/bge_chunks_matrix.npy |
+---
 
 ## Step 10c — Query Planner
-**Date:** 2026-04-04
-**Branch:** feature/step-10c-query-planner
-**Files added:**
-- `src/query/planner.py`
-- `scripts/test_planner.py`
 
-### Goal
-Rule-based intent detection and query decomposition.
-Produces a typed contract (PlannerOutput) that downstream
-retriever, reranker, and generator consume without ambiguity.
+**Files:** `src/query/planner.py`, `scripts/test_planner.py`
 
-### What was built
-**`planner.py`** — typed contract + five components:
-- `detect_intent()` — pattern matching across four intent
-  classes with bias correction for edge cases
-- `extract_entities()` — named entity extraction for clusters,
-  methods, instruments, quantities, years, authors
-- `extract_explicit_filters()` — explicit-only hard constraints
-  (year range, journal, instrument when literally stated)
-- `build_soft_boosts()` — inferred preferences as additive
-  scoring hints, never hard filters
-- `plan_query()` — main entry point, returns full PlannerOutput
-
-### Typed contract output
+**Typed contract output (PlannerOutput):**
 ```json
 {
   "intent": "comparison",
@@ -868,394 +133,404 @@ retriever, reranker, and generator consume without ambiguity.
 }
 ```
 
-### Bugs found and fixed
-| Bug | Fix |
-|---|---|
-| Year regex captured group (19/20) not full year | Changed to non-capturing group `(?:19\|20)` |
-| "MeerKAT papers after 2020" → fact not discovery | Added `\bpapers\s+(after\|before\|since)\b` to DISCOVERY_PATTERNS |
-| "MNRAS papers about RM" → discovery not fact | Added bias correction: journal + method/quantity → fact |
+- 4 intents: fact / comparison / synthesis / discovery
+- Rule-based — microsecond latency, fully auditable
+- Explicit vs inferred constraint separation
+- 11/11 test accuracy after 3 bug fixes
 
-### Test results
-11/11 intent detections correct after fixes.
+**Bugs fixed:**
+- Year regex captured group not full year → non-capturing group
+- "MeerKAT papers after 2020" wrong intent → added discovery pattern
+- "MNRAS papers about RM" wrong intent → journal+method bias correction
 
-### Key design decisions
-| Decision | Reason |
-|---|---|
-| Rule-based not LLM | Microsecond latency, fully auditable |
-| Explicit vs inferred separation | Hard-filtering on inferred constraints breaks recall |
-| Intent-dependent budgets | Synthesis needs 150 papers, fact only needs 40 |
-| Thinking mode for comparison/synthesis | Complex multi-paper reasoning justified |
-| Non-thinking for fact/discovery | Speed matters, direct evidence sufficient |
+---
 
 ## Step 10d — Hybrid Retriever
-**Date:** 2026-04-04
-**Branch:** feature/step-10d-hybrid-retriever
-**Files added:**
-- `src/query/retriever.py`
-- `scripts/test_retriever.py`
 
-### Goal
-Wire all retrieval signals into one pipeline:
-SPECTER2 paper-level filtering → DuckDB hard filters →
-BM25 + BGE-M3 chunk retrieval → RRF fusion →
-section priors + metadata boosts.
+**Files:** `src/query/retriever.py`, `scripts/test_retriever.py`
 
-### Architecture
-Stage 1 — Paper candidates
-SPECTER2 FAISS → top paper_k*3 papers
-DuckDB explicit hard filters (year, journal, instrument)
-→ filtered paper pool
-Stage 2 — Chunk retrieval
-BM25 lexical → top chunk_lex_k chunks from pool
-BGE-M3 dense → top chunk_dense_k chunks from pool
-RRF fusion: score = Σ 1/(60 + rank_i)
+**Scoring formula:**
+```
+retrieval_score = rrf_score
+                + 0.15 × section_prior
+                + 0.10 × metadata_boost
 
-α(0.15) * section_prior
-β(0.10) * metadata_boost
-→ top rerank_k chunks
+rrf_score = Σ 1/(60 + rank_i)
+```
 
+**Bugs fixed:**
+- DuckDB `ANY(?)` → `IN (?,?,?)` for Windows compatibility
+- FAISS search n_retrieve = paper_k×20 to get enough unique papers
+- Graph expansion referenced `rows_db` out of scope → fixed to `all_corpus`
 
-### Scoring formula
-retrieval_score =
-rrf_score
+---
 
-0.15 * section_prior
-0.10 * metadata_boost
+## Step 10e — BGE Reranker
 
-rrf_score = Σ 1/(60 + rank_i)  (standard k=60)
-section_prior: intent-dependent lookup (results=1.0 for fact)
-metadata_boost: +0.1 if has_numerical_result, +0.05 if has_equation
+**Files:** `src/query/reranker.py`, `scripts/test_reranker.py`
 
-### Test results
-| Query | Paper candidates | Chunks fused | Distinct papers top-5 |
-|---|---|---|---|
-| Murgia 2004 A119 spectral index | 52→40 | 205 | 4 |
-| GRF vs BxC comparison | 103→80 | 282 | 5 |
-| LOFAR after 2018 | 56→22 | 174 | 4 |
+- Model: `BAAI/bge-reranker-v2-m3` via `sentence_transformers.CrossEncoder`
+- GPU, fp16, diversity control after reranking
+- Key result: wrong rank 1 demoted to rank 6, correct chunk promoted to rank 1
 
-Year filter correctly reduced LOFAR candidates from 56 to 22.
-Second result for Murgia query explicitly mentions
-"Murgia et al. (2004) found spectral slope q≈2" — correct.
+**Issue fixed:** FlagReranker incompatible with transformers 5.x →
+switched to CrossEncoder.
 
-### Known limitations
-- Graph expansion stub — disabled until Step 11 populates edges
-- Section prior dominates RRF in some cases — reranker corrects
-- LOFAR query intent detected as fact not discovery — acceptable,
-  year filter still applied correctly
-
-  ## Step 10e — BGE Reranker
-**Date:** 2026-04-04
-**Branch:** feature/step-10e-reranker
-**Files added:**
-- `src/query/reranker.py`
-- `scripts/test_reranker.py`
-
-### Goal
-Cross-encoder precision reranking of top-40 retriever
-candidates. Sees query + chunk together — much more precise
-than bi-encoder similarity used in retrieval.
-
-### What was built
-**`reranker.py`** — three functions:
-- `get_reranker()` — loads BAAI/bge-reranker-v2-m3 via
-  sentence_transformers CrossEncoder, GPU, fp16, singleton
-- `rerank_chunks()` — cross-encoder scores all query-chunk
-  pairs, stores rerank_score + pre_rerank_score, sorts desc
-- `apply_diversity()` — enforces max chunks per paper and
-  minimum distinct papers, applied AFTER reranking
-- `rerank()` — orchestrates both steps
-
-### Issue encountered
-FlagEmbedding FlagReranker incompatible with transformers 5.x
-— `XLMRobertaTokenizer has no attribute prepare_for_model`.
-Fix: switched to sentence_transformers CrossEncoder which
-supports same model and is stable with transformers 5.x.
-
-### Key result — ranking correction
-For query "What spectral index n did Murgia 2004 find for A119?":
-
-| Stage | Rank 1 chunk | Score |
-|---|---|---|
-| After retrieval | arxiv:1612.01764 — spectral index at 1.38 GHz | ret=0.1718 |
-| After reranking | arxiv:0809.2411 — "Murgia et al. (2004) found spectral slope q≈2 in A119" | rerank=0.9651 |
-
-Retrieval rank 1 was wrong. Reranker corrected it to rank 6.
-The directly relevant chunk jumped from retrieval rank 2 to
-final rank 1. This is exactly the reranker's job.
-
-### Diversity results
-- 40 chunks → 8 evidence chunks from 6 distinct papers
-- max 3 chunks per paper (fact intent) enforced
-- min 2 papers requirement satisfied (6 > 2)
-
-### Design decisions
-| Decision | Reason |
-|---|---|
-| CrossEncoder over FlagReranker | Stable with transformers 5.x |
-| Diversity after reranking | Let reranker score freely first |
-| normalize=False (predict) | CrossEncoder.predict handles normalisation |
-| max 2 chunks/paper for synthesis | Forces diversity across literature |
+---
 
 ## Step 10f — Evidence Assembler
-**Date:** 2026-04-04
-**Branch:** feature/step-10f-evidence-assembler
-**Files added:**
-- `src/query/assembler.py`
-- `scripts/test_assembler.py`
 
-### Goal
-Structure reranked chunks into a typed evidence pack before
-passing to the generator. Handles deduplication, conflict
-detection, abstention signal, and paper grouping.
+**Files:** `src/query/assembler.py`, `scripts/test_assembler.py`
 
-### What was built
-**`assembler.py`** — five components:
-- `deduplicate_chunks()` — cosine similarity via BGE matrix
-  (threshold=0.92); falls back to word overlap if matrix
-  unavailable; keeps higher rerank_score on duplicates
-- `detect_conflicts()` — rule-based lexical cue counting:
-  positive, negative, uncertainty patterns; flags disagreement
-  when negative cues appear in 2+ distinct papers
-- `compute_abstention()` — numeric rules: <3 chunks, <min_papers,
-  max_score<0.30, single source → abstain
-- `group_by_paper()` — groups chunks by paper, attaches DuckDB
-  metadata (title, year, journal, bibcode)
-- `assemble_evidence()` — orchestrates all steps, returns
-  typed evidence pack with support_stats
+- Cosine deduplication via BGE matrix (threshold=0.92)
+- Rule-based conflict detection (positive/negative/uncertainty cues)
+- Abstention: <3 chunks, <min_papers, max_score<0.30
+- Neighbour expansion for comparison/synthesis (±1 chunk)
 
-### Bug found and fixed
-Abstract chunks had node_id format `arxiv:....__abstract`
-causing DuckDB lookup to fail → year and title showing None.
-Fix: normalise node_id by stripping `__abstract` suffix
-before metadata lookup and group assignment.
+**Bug fixed:** Abstract chunks `arxiv:....__abstract` causing DuckDB lookup
+failure → stripped suffix before lookup.
 
-### Test results
-| Query | Abstain | Chunks | Papers | Disagreement |
-|---|---|---|---|---|
-| Murgia 2004 spectral index | False | 8 | 6 | False |
-| GRF vs BxC comparison | False* | 12 | 10 | True |
-
-*Disagreement flagged but not abstaining — correct behaviour.
-GRF vs BxC is a genuine ongoing debate in the literature.
-
-### Conflict detection working
-For GRF vs BxC query:
-- "GRF models are still too simple to fully capture..."
-  → negative cue detected
-- Flagged in 2 papers → has_disagreement = True
-- Generator will be instructed to report disagreement explicitly
-
-### Key design decisions
-| Decision | Reason |
-|---|---|
-| Cosine for dedup only | Cosine cannot detect contradiction |
-| Rule-based for conflict | Explicit cue phrases more reliable than embedding proximity |
-| Abstention is numeric | No vague vibes — precise thresholds enforced |
-| Disagreement does not abstain | Report conflict rather than refuse to answer |
-| Groups sorted by best rerank score | Most relevant paper leads the evidence pack |
+---
 
 ## Step 10g — Evaluation Set
-**Date:** 2026-04-04
-**Branch:** feature/step-10g-evaluation-set
-**Files added:**
-- `scripts/generate_eval_set.py`
-- `scripts/regenerate_eval_questions.py`
-- `scripts/test_eval_gen.py`
-- `scripts/corpus_overview.py`
-- `scripts/review_eval_set.py`
-- `scripts/debug_eval_gen.py`
-- `scripts/debug_ollama.py`
-- `scripts/evaluate.py`
-- `data/eval_set_final.json`
 
-### Goal
-Build a 30-question evaluation set with ground truth grounded
-in actual corpus chunks. Automated generation using Qwen3
-to avoid manual domain expertise requirement.
+**Files:** `scripts/generate_eval_set.py`, `scripts/evaluate.py`,
+`data/eval_set_final.json`
 
-### Methodology
-1. Corpus overview — understand temporal + author distribution
-2. Stratified chunk sampling — 5 chunks per era (1995–2026)
-3. Qwen3 generates Q&A pairs from chunk text
-4. Quality filter — overlap check, length check, no figure refs
-5. Manual review — identified 12 off-topic questions
-6. ICM-targeted regeneration — strict domain prompt
-7. 5 abstention questions generated separately
+- 30 questions: 25 factual (stratified 1995–2026) + 5 abstention
+- Auto-generated by Qwen3 from corpus chunks
+- Results: **77% abstention, 60% paper recall, 64% contains, 0.839 avg rerank**
 
-### Final evaluation scores
+---
+
+## Step 10h — Generator
+
+**Files:** `src/query/generator.py`, `scripts/test_generator.py`
+
+**Routing:**
+- `fact`, `discovery` → `deepseek-chat` (V3.2 non-thinking, fast)
+- `comparison`, `synthesis` → `deepseek-reasoner` (V3.2 thinking mode)
+- Fallback → Qwen3:14b local on any DeepSeek failure
+
+**Features:**
+- `_fix_math_notation()` — normalises broken LaTeX (B 0 → $B_0$, etc.)
+- 2-retry with exponential backoff on DeepSeek 503
+- `extract_with_deepseek()` for structured extraction tasks
+
+---
+
+## Step 11 — Citation Graph
+
+**Files:** `src/storage/citation_graph.py`, `scripts/build_citation_edges.py`
+
+- ADS references endpoint, 0.3s rate limiting
+- CITES edges: 19,919 | Stub nodes: 7,924 | CO_CITED edges: 10,604
+- Total: 8,232 nodes, 30,523 edges
+- Graph expansion in retriever: 1-hop typed, strong edges only
+
+---
+
+## Step 12 — Structured Extraction (Layer 3)
+
+**Files:** `src/extraction/structured_extractor.py`,
+`scripts/run_structured_extraction.py`
+
+Per paper: methods, key_quantities, scientific_claims, physical_domain,
+instruments, clusters — stored as JSON in `paper_extractions` table.
+
+---
+
+## Frontend — Chat UI
+
+**Files:** `frontend/app.py`, `frontend/static/index.html`,
+`frontend/static/script.js`, `frontend/static/style.css`
+
+**Three tabs:**
+- **Chat** — conversation history, expandable pipeline trace, math+markdown rendering
+- **Graph** — D3 citation network, query focus mode, year-lane corpus view
+- **Stats** — corpus overview + per-query evidence analysis
+
+**Features:**
+- KaTeX math rendering (inline and display)
+- Marked.js markdown (bold, bullets, tables, code)
+- Citation tooltips on hover (title, year, journal, section)
+- Click [E1] → PDF opens at correct page with PyMuPDF highlight
+- Highlight expands ±2 surrounding text blocks for context
+- Conversation history in `data/conversations.duckdb`
+- Auto-reload on code change
+- Elapsed timer during generation
+- Collapsible sidebar
+- Auto-focus citation graph on query results
+
+**Graph modes:**
+- Query mode: force simulation, settles and pins nodes, evidence nodes amber+ranked
+- Corpus mode: static year-lane layout, instant render, no simulation
+
+---
+
+## Chrome Extension — LLM Export
+
+**Files:** `chrome-extension/manifest.json`, `chrome-extension/content.js`,
+`chrome-extension/background.js`
+
+- Retrieval-only endpoint `/api/retrieve-only` — full pipeline, skip generation
+- Prompt stored server-side (60s expiry), fetched by extension via ID
+- Auto-injects + submits prompt into Claude ✓, ChatGPT ✓, Gemini ✓
+- Fallback: copy-to-clipboard always available
+- UI toggle: Built-in (DeepSeek) ↔ Export (Claude/ChatGPT/Gemini)
+
+---
+
+## Key Files Reference
+
+```
+src/
+  extraction/
+    pdf_extractor.py          Stage A
+    text_cleaner.py           Stage A
+    structured_extractor.py   Step 12
+  enrichment/
+    ads_enricher.py           Stage B
+  storage/
+    db.py                     DuckDB schema
+    faiss_index.py            SPECTER2 FAISS
+    graph.py                  NetworkX I/O
+    citation_graph.py         Step 11
+  query/
+    planner.py                Step 10c
+    bm25_index.py             Step 10a
+    bge_embedder.py           Step 10b
+    retriever.py              Step 10d
+    reranker.py               Step 10e
+    assembler.py              Step 10f
+    generator.py              Step 10h
+  pipeline.py                 Ingestion orchestrator
+
+frontend/
+  app.py                      FastAPI server
+  conversations_db.py         Chat history DuckDB
+  static/
+    index.html                Main UI
+    script.js                 All JS logic
+    style.css                 Observatory Terminal theme
+    paper_viewer.html         PDF viewer with highlighting
+
+chrome-extension/
+  manifest.json
+  content.js
+  background.js
+
+data/
+  knowledge_base.duckdb
+  conversations.duckdb
+  faiss/chunks.index           SPECTER2 (58,077 × 768)
+  faiss/bge_chunks.index       BGE-M3 (58,077 × 1024)
+  faiss/bge_chunks_matrix.npy
+  bm25/bm25_index.pkl
+  graph/citation_graph.graphml  8,232 nodes, 30,523 edges
+  eval_set_final.json
+  eval_results.json
+```
+
+---
+
+## Environment
+
+```
+# .env
+ADS_TOKEN=...
+DEEPSEEK_API_KEY=...
+HF_TOKEN=...
+
+# Start
+cd Knowledge_Base
+.venv\Scripts\Activate.ps1
+python -m uvicorn frontend.app:app --host 0.0.0.0 --port 8000 \
+  --reload --reload-dir src --reload-dir frontend \
+  --reload-include "*.html" --reload-include "*.css" --reload-include "*.js"
+
+# Browser
+http://localhost:8000
+
+# Extension
+chrome://extensions → Developer mode → Load unpacked → chrome-extension/
+```
+
+---
+
+## Corpus Statistics
+
+| Metric | Value |
+|--------|-------|
+| Papers | 251 |
+| Chunks (non-noise) | 58,077 |
+| BM25 documents | 58,328 |
+| Graph nodes | 8,232 |
+| CITES edges | 19,919 |
+| CO_CITED edges | 10,604 |
+| Era coverage | 1995–2026 |
+| Top authors | Govoni (11), Vazza (10), Bonafede (7) |
+| Top journals | MNRAS (68), A&A (64), ApJ (44) |
+
+---
+
+## Evaluation Results
+
 | Metric | Score |
-|---|---|
-| Abstention accuracy | 23/30 (77%) |
+|--------|-------|
+| Abstention accuracy | 77% (23/30) |
 | Paper recall | 60% |
 | Contains score | 64% |
 | Avg rerank score | 0.839 |
 
-### Key findings
-- Paper recall metric is misleading — system finds correct
-  answers from citing papers, not just source papers
-- 5 abstention questions failed — too close to corpus content;
-  domain scope check made things worse (60% → reverted)
-- Q016, Q023 correctly abstain due to very low rerank scores
-  (0.117, 0.011) — questions were too narrow
+---
+
+## Known Limitations
+
+- FAISS runs on CPU only (Blackwell sm_120 incompatible with faiss-gpu)
+- Abstention questions fail when too close to corpus content
+- Structured extraction quantity values imperfect when text starts with figure captions
+- PDF highlighting finds adjacent blocks when chunk text differs from raw PDF
+- Chrome extension selectors may break if LLM UIs update their DOM
 
 ---
 
-## Step 10h — Qwen3 Generator
-**Date:** 2026-04-04
-**Branch:** feature/step-10h-generator
-**Files added:**
-- `src/query/generator.py`
-- `scripts/test_generator.py`
+## Future Tasks
 
-### Goal
-Wire evidence pack into Qwen3:14b for grounded answer
-synthesis with per-claim citations.
+### Task 1 — Figure Extraction (Highest Research Value)
 
-### What was built
-**`generator.py`** — four components:
-- `format_evidence()` — structures evidence as numbered
-  blocks [E1]...[En] with paper metadata
-- `build_prompt()` — assembles system context, evidence,
-  abstention signals, and question
-- `generate_answer()` — routes to thinking/non-thinking
-  mode, extracts cited evidence items from [E1] references
-- `print_result()` — formatted output for terminal
+Extract figures from PDFs, describe with Claude vision, make searchable.
 
-### Routing
-- `non_thinking`: fact, discovery — fast, direct
-- `thinking`: comparison, synthesis — careful reasoning
+**Architecture:**
+- `src/extraction/figure_extractor.py` — PyMuPDF extracts images + captions
+- New DuckDB table: `figures` (figure_id, node_id, figure_num, caption, page_num, image_path)
+- Caption embedding → separate FAISS index for figure retrieval
+- Claude vision API → rich text description of each figure (axis labels, values, trends)
+- FastAPI: `/api/figures/{node_id}`, `/api/figure/{figure_id}`
+- UI: figure thumbnails in evidence panel, lightbox on click
+- Link figures to chunks via `figure_refs` already stored in chunks table
 
-### Test results
-| Query | Mode | Result |
-|---|---|---|
-| Murgia 2004 spectral index n | non-thinking | ✓ q≈2 for A119, cited correctly |
-| Radio mini-halo size | non-thinking | ✓ ≃500 kpc, two sources cited |
-| GRF vs MHD comparison | thinking | ✓ two differences, honest caveat |
-| Coma optical luminosity | non-thinking | ✓ abstained — not in evidence |
+**Value:** RM maps, magnetic field profiles, depolarization curves become
+viewable alongside evidence. Figure descriptions become searchable text.
 
-### Key behaviours
-- Generator correctly uses citing papers as evidence sources
-- Thinking mode shows reasoning trace — auditable
-- Out-of-scope questions refused without triggering numeric
-  abstention — instruction following handles this layer
-- Citations extracted from [E1] markers in generated text
-## Step 11 — Citation Edge Construction
-**Date:** 2026-04-04
-**Branch:** feature/step-11-citation-edges
-**Files added:**
-- `src/storage/citation_graph.py`
-- `scripts/build_citation_edges.py`
-- `scripts/test_citation_edges.py`
-- `scripts/test_graph_retrieval.py`
-
-### Goal
-Populate NetworkX graph with real citation edges from ADS.
-Activates graph expansion in the retriever pipeline.
-
-### What was built
-**`citation_graph.py`**:
-- `fetch_references()` — queries ADS references endpoint
-  per bibcode, 0.3s rate limiting
-- `extract_arxiv_id()` — pulls arXiv ID from ADS identifier
-  field for node_id construction
-- `infer_citation_role()` — assigns foundational/incidental
-  based on known seminal paper bibcodes
-- `add_citation_edges_from_ads()` — main builder: iterates
-  251 papers, fetches refs, adds CITES edges + stub nodes
-- `add_co_citation_edges()` — adds CO_CITED edges between
-  corpus papers sharing ≥3 common references
-
-### Full corpus results
-| Metric | Value |
-|---|---|
-| Papers processed | 251/251, 0 failed |
-| CITES edges | 19,919 |
-| New stub nodes | 7,924 |
-| Total nodes | 8,232 |
-| CO_CITED edges (min_shared=3) | 10,604 |
-| Total edges | 30,523 |
-
-### Retriever update
-- Graph expansion activated in `retrieve_paper_candidates()`
-- 1-hop citation expansion (strong edges only: foundational,
-  methodological, data_source) up to 15 neighbours
-- 1-hop co-citation expansion for synthesis/discovery only
-- Fixed DuckDB `ANY(?)` → `IN (?,?,?)` for Windows compatibility
-- Fixed FAISS search: n_retrieve = paper_k × 20 to get enough
-  unique paper candidates
-
-### Bug found and fixed
-`retrieve_paper_candidates` had duplicate stub block and
-missing return — the old stub comment block remained alongside
-the new expansion code, causing the function to fall through.
-Fix: rewrote the entire function cleanly as single code path.
-
-### Graph expansion test
-- Without graph: 40 candidates, 23 unique papers in chunks
-- With graph: 40→42 candidates, pipeline works end to end
-- Graph expansion adds breadth — RRF scoring determines
-  which candidates survive into final evidence
+**Estimated effort:** 2–3 days.
 
 ---
 
-## Decisions Log
-*Running record of non-obvious choices made during the build.*
+### Task 2 — Domain-Agnostic Refactor (Highest Career Value)
 
-| Date | Decision | Rationale |
-|---|---|---|
-| 2026-04-03 | faiss-cpu over faiss-gpu | Blackwell sm_120 unsupported in faiss-gpu |
-| 2026-04-03 | PyTorch nightly cu130 | Only build supporting RTX 5070 Ti (sm_120) |
-| 2026-04-03 | DuckDB over SQLite | Columnar, faster analytical queries, no server |
-| 2026-04-03 | NetworkX over Neo4j | Graph fits in RAM; no JVM; full Python API |
-| 2026-04-03 | SPECTER2 over general embeddings | Trained on scientific papers; domain vocabulary |
-| 2026-04-03 | Paragraph-level chunks | Balance between precision and context |
-| 2026-04-03 | Hierarchical chunks | Section summary attached to each paragraph chunk |
+Turn this into a reusable open-source tool for any field of knowledge.
 
----
+**Single config file:**
+```yaml
+# config/domain.yaml
+domain:
+  name: "Intracluster Magnetic Fields"
+  short_name: "ICM·KB"
 
-## Issues & Fixes Log
-*Running record of problems encountered and how they were resolved.*
+entities:
+  sources: ["coma cluster", "abell 119", ...]
+  methods:
+    "grf": "GRF"
+    "mhd": "MHD"
+  instruments:
+    "vla": "VLA"
+    "lofar": "LOFAR"
 
-| Date | Issue | Fix |
-|---|---|---|
-| 2026-04-03 | PowerShell blocked `.ps1` activation | `Set-ExecutionPolicy RemoteSigned -Scope CurrentUser` |
-| 2026-04-03 | cu124 PyTorch: sm_120 incompatibility warning | Switched to nightly cu130 build |
-| 2026-04-03 | Venv got CPU-only PyTorch by default | Explicitly reinstalled with cu130 index URL |
+generator:
+  system_prompt: |
+    You are a scientific assistant for astrophysics research...
 
----
+enrichment:
+  source: "ads"   # ads | pubmed | crossref | arxiv | none
+  api_key_env: "ADS_TOKEN"
 
-## File Structure
-```
-Knowledge_Base/
-├── .venv/                      # virtual environment (not committed to git)
-├── papers/                     # downloaded PDFs
-├── paper_node_schema.json      # four-layer node schema definition
-├── collect_papers.py           # ADS citation graph crawler + PDF downloader
-├── DEVLOG.md                   # this file
-├── step1_env_check.py
-├── step2_verify.py
-├── step3_embedding_check.py
-└── notebooks/                  # Jupyter notebooks (Steps 4+)
+ui:
+  welcome_title: "Intracluster Magnetic Fields"
+  suggestions:
+    - "What spectral index did Murgia 2004 find for A119?"
 ```
 
+**What this enables:**
+- Computational fluid dynamics papers
+- Medical oncology literature
+- Legal case law
+- Economics journals
+- Philosophy papers
+
+**New files needed:**
+- `src/config.py` — singleton YAML loader
+- `scripts/setup.py` — one-command setup
+- `README.md` — "Deploy for your domain in 5 steps"
+- CrossRef API integration (enrichment for any DOI)
+
+**Estimated effort:** 2–3 days.
+
 ---
 
-## Reference: Useful Commands
+### Task 3 — Concept Dependency Graph (Highest Pedagogical Value)
 
-```powershell
-# Activate venv (run from project root every session)
-.venv\Scripts\Activate.ps1
+Interactive knowledge prerequisite graph for ICM concepts.
 
-# Launch VS Code in project folder
-code .
+**Phase 1 — Extract from existing corpus:**
+- DeepSeek reasoner extracts concept dependency pairs from chunks
+- Example edges: σ_RM → Faraday_rotation → electromagnetic_polarization → Maxwell
+- ~80–120 concept nodes for ICM domain
+- Store as `data/graph/concept_graph.graphml`
 
-# Check which Python / pip you're using
-where python
-where pip
+**Phase 2 — Textbook ingestion:**
+- 5–8 key textbooks: Rybicki & Lightman, Longair, Jackson, Pacholczyk
+- Same chunking + extraction pipeline
+- Extends graph to foundational physics
 
-# Confirm GPU is visible
-python -c "import torch; print(torch.cuda.get_device_name(0))"
+**UI — new Concepts tab:**
+- D3 force graph of concept nodes
+- Node states: green (understood) / yellow (partial) / red (don't understand)
+- States persisted in `conversations.duckdb` → new `concept_states` table
+- "Explain my gaps" button → topological sort of red nodes → LLM explains each
+  in prerequisite order, grounded in corpus chunks
 
-# Start Jupyter in VS Code
-# Ctrl+Shift+P → "Create New Jupyter Notebook" → select .venv kernel
+**Critical human step:** After extraction, manually verify top 30–40 dependency
+edges before building UI. Domain expertise required — only Abir can validate.
+
+**Estimated effort:** 1 week.
+
+---
+
+### Task 4 — Docker Packaging (Broadest Deployment)
+
+One-command deployment on any machine.
+
+**Config A — Full build (GPU required):**
+```yaml
+services:
+  app:    # FastAPI + full pipeline
+  ollama: # Qwen3:14b local fallback
 ```
+
+**Config B — Query only (no GPU, DeepSeek API):**
+```yaml
+services:
+  app:    # FastAPI + pre-built indices only
+          # No Ollama, no GPU needed
+```
+
+**What to ship (~3GB without PDFs):**
+- `data/knowledge_base.duckdb`
+- `data/faiss/*.index` + id maps
+- `data/bm25/bm25_index.pkl`
+- `data/graph/citation_graph.graphml`
+
+**Desktop launcher:**
+```batch
+# launch.bat — double-click to start
+python launch.py   # starts server + opens browser automatically
+```
+
+**Prerequisite:** Complete domain-agnostic refactor (Task 2) first.
+
+**Estimated effort:** 1–2 days after Task 2.
+
+---
+
+*Last updated: 2026-04-05*
