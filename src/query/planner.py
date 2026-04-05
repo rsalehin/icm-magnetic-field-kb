@@ -357,18 +357,18 @@ BUDGET_MAP = {
     ),
     "comparison": Budgets(
         paper_k=80,
-        chunk_lex_k=150,
-        chunk_dense_k=150,
-        rerank_k=50,
-        evidence_k=12,
-        min_papers=3,
-    ),
-    "synthesis": Budgets(
-        paper_k=150,
         chunk_lex_k=200,
         chunk_dense_k=200,
         rerank_k=60,
         evidence_k=15,
+        min_papers=3,
+    ),
+    "synthesis": Budgets(
+        paper_k=150,
+        chunk_lex_k=250,
+        chunk_dense_k=250,
+        rerank_k=80,
+        evidence_k=20,
         min_papers=4,
     ),
     "discovery": Budgets(

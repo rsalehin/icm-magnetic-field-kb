@@ -17,7 +17,10 @@ from pathlib import Path
 from tqdm import tqdm
 from FlagEmbedding import BGEM3FlagModel
 # src/pipeline.py  — add after existing imports
-
+import warnings
+import logging
+warnings.filterwarnings("ignore", message=".*position_ids.*")
+logging.getLogger("sentence_transformers").setLevel(logging.ERROR)
 import os
 from dotenv import load_dotenv
 

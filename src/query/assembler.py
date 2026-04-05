@@ -175,6 +175,62 @@ def detect_conflicts(chunks: list[dict]) -> dict:
         "total_positive_cues":  total_positive,
         "conflict_notes":     conflict_notes,
     }
+    
+
+def expand_with_neighbours(
+    evidence: list[dict],
+    conn,
+    n_neighbours: int = 1,
+) -> list[dict]:
+    """
+    For each evidence chunk, fetch n_neighbours before and after
+    from the same paper. Adds context without changing ranking.
+    """
+    expanded = list(evidence)
+    existing_chunk_ids = {e["chunk_id"] for e in evidence}
+
+    for e in evidence:
+        chunk_id = e.get("chunk_id", "")
+        if not chunk_id:
+            continue
+
+        # Parse chunk index from chunk_id: arxiv:xxx__c0042 → 42
+        try:
+            chunk_idx = int(chunk_id.rsplit("__c", 1)[1])
+        except (IndexError, ValueError):
+            continue
+
+        node_id = e.get("paper_id", "")
+
+        # Fetch neighbours
+        rows = conn.execute("""
+            SELECT chunk_id, chunk_index, section_title, text
+            FROM chunks
+            WHERE node_id = ?
+              AND chunk_index BETWEEN ? AND ?
+              AND is_noise = FALSE
+            ORDER BY chunk_index
+        """, [
+            node_id,
+            chunk_idx - n_neighbours,
+            chunk_idx + n_neighbours,
+        ]).fetchall()
+
+        for row in rows:
+            cid = row[0]
+            if cid in existing_chunk_ids or cid == chunk_id:
+                continue
+            existing_chunk_ids.add(cid)
+            expanded.append({
+                **e,  # inherit paper metadata
+                "chunk_id":     cid,
+                "section":      row[2],
+                "text":         row[3],
+                "rerank_score": e["rerank_score"] * 0.8,  # slightly lower score
+                "is_neighbour": True,
+            })
+
+    return expanded
 
 
 def compute_abstention(
@@ -318,6 +374,13 @@ def assemble_evidence(
                 "rerank_score": chunk.get("rerank_score", 0.0),
                 "retrieval_score": chunk.get("retrieval_score", 0.0),
             })
+
+    # ── ADD HERE ──────────────────────────────────────────────────────────────
+    # Step 5b — expand with neighbours for deep queries
+    if intent in ("comparison", "synthesis"):
+        evidence_list = expand_with_neighbours(evidence_list, conn, n_neighbours=1)
+        evidence_list.sort(key=lambda x: x["rerank_score"], reverse=True)
+    
 
     # Support stats
     distinct_papers = len({e["paper_id"] for e in evidence_list})

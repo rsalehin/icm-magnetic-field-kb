@@ -52,6 +52,24 @@ def init_schema(conn: duckdb.DuckDBPyConnection) -> None:
             notes           VARCHAR
         )
     """)
+    
+    # ── paper_extractions table — Layer 3 structured extraction ──────────────
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS paper_extractions (
+            node_id           VARCHAR PRIMARY KEY,
+            methods           JSON,
+            key_quantities    JSON,
+            scientific_claims JSON,
+            physical_domain   JSON,
+            instruments       JSON,
+            clusters          JSON,
+            extraction_model  VARCHAR,
+            extracted_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        )
+    """)
+
+    conn.commit()
+    print("Schema initialised successfully.")
 
     # ── authors table — normalised author list ────────────────────────────────
     conn.execute("""

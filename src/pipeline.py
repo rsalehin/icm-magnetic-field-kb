@@ -17,6 +17,20 @@ from datetime import datetime
 
 import torch
 from sentence_transformers import SentenceTransformer
+# src/pipeline.py  — add after existing imports
+import warnings
+warnings.filterwarnings(
+    "ignore",
+    message=".*embeddings.position_ids.*",
+)
+import logging
+logging.getLogger("sentence_transformers").setLevel(logging.ERROR)
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+os.environ["HF_TOKEN"]                      = os.getenv("HF_TOKEN", "")
+os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
 
 from src.extraction.pdf_extractor import extract_paper
 from src.enrichment.ads_enricher  import enrich_paper
