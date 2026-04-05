@@ -1,9 +1,6 @@
 # ICM Magnetic Field Knowledge Base — DEVLOG
 
 **Project:** icm-magnetic-field-kb  
-**Location:** `C:\Users\rsalehin\OneDrive\Desktop\Projects\TLS\Papers\Knowledge_Base`  
-**GitHub:** https://github.com/rsalehin/icm-magnetic-field-kb (private)  
-**Stack:** Python 3.12, PyTorch + CUDA, RTX 5070 Ti (17GB), 67.8GB RAM, Windows 11
 
 ---
 
