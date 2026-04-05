@@ -881,3 +881,136 @@ html, body {
 /* Dim math in user messages */
 .message.user .katex { color: var(--text); }
 .tooltip-hidden { display: none !important; }
+
+/* ── Markdown rendering ───────────────────────────────────────────────────── */
+.message-content p {
+  margin-bottom: 0.7em;
+  line-height: 1.65;
+}
+.message-content p:last-child { margin-bottom: 0; }
+
+.message-content strong {
+  color: var(--text-bright);
+  font-weight: 600;
+}
+
+.message-content em {
+  color: var(--text);
+  font-style: italic;
+}
+
+.message-content ul, .message-content ol {
+  margin: 0.5em 0 0.7em 1.4em;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.message-content li { line-height: 1.55; }
+
+.message-content h1, .message-content h2, .message-content h3 {
+  font-family: var(--cond);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--text-bright);
+  margin: 1em 0 0.4em;
+}
+.message-content h1 { font-size: 16px; }
+.message-content h2 { font-size: 14px; }
+.message-content h3 { font-size: 13px; color: var(--cyan); }
+
+.message-content code {
+  font-family: var(--mono);
+  font-size: 11px;
+  background: #0f1825;
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  padding: 1px 5px;
+  color: var(--cyan);
+}
+
+.message-content pre {
+  background: #0a0d16;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 12px 14px;
+  overflow-x: auto;
+  margin: 0.6em 0;
+}
+.message-content pre code {
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 12px;
+  color: var(--text);
+}
+
+.message-content blockquote {
+  border-left: 2px solid var(--cyan-dim);
+  padding-left: 12px;
+  margin: 0.5em 0;
+  color: var(--text-dim);
+  font-style: italic;
+}
+
+.message-content hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 1em 0;
+}
+
+.message-content table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 0.7em 0;
+  font-size: 12px;
+}
+.message-content th {
+  background: var(--bg-panel);
+  color: var(--cyan);
+  font-family: var(--cond);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  text-align: left;
+}
+.message-content td {
+  padding: 5px 10px;
+  border: 1px solid var(--border-dim);
+  color: var(--text);
+}
+.message-content tr:nth-child(even) td {
+  background: #090c14;
+}
+
+/* ── Sidebar collapse ─────────────────────────────────────────────────────── */
+#sidebar {
+  transition: width 0.2s ease;
+}
+#sidebar.collapsed {
+  width: 0;
+  overflow: hidden;
+  border-right: none;
+}
+#sidebar-toggle {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 16px;
+  height: 48px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-left: none;
+  border-radius: 0 4px 4px 0;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-dim);
+  font-size: 10px;
+  z-index: 50;
+  transition: left 0.2s ease, color 0.15s;
+}
+#sidebar-toggle:hover { color: var(--cyan); }

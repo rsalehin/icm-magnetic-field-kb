@@ -7,6 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
 <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/marked@12.0.0/marked.min.js"></script>
 <link rel="stylesheet" href="/static/style.css">
 <link href="https://fonts.googleapis.com/css2?family=DM+Mono:ital,wght@0,300;0,400;0,500;1,400&family=Barlow:wght@300;400;500;600&family=Barlow+Condensed:wght@400;500;600;700&display=swap" rel="stylesheet">
 <script src="https://d3js.org/d3.v7.min.js"></script>
@@ -40,8 +41,8 @@
 <div id="app">
 
 <!-- ── CHAT TAB ─────────────────────────────────────────────────────────── -->
-<div id="chat-tab" class="tab-content active">
-
+<div id="chat-tab" class="tab-content active" style="position:relative">
+  <button id="sidebar-toggle" onclick="toggleSidebar()" title="Toggle sidebar">‹</button>
   <div id="sidebar">
     <div id="sidebar-header">
       <button id="new-chat-btn" onclick="newConversation()">+ New conversation</button>
@@ -63,18 +64,38 @@
       </div>
     </div>
     <div id="input-area">
-      <div id="input-row">
-        <textarea
-          id="question-input"
-          placeholder="Ask about intracluster magnetic fields, Faraday rotation, radio observations..."
-          rows="1"
-          onkeydown="handleKey(event)"
-          oninput="autoResize(this)"
-        ></textarea>
-        <button id="send-btn" onclick="sendQuestion()">Send</button>
-      </div>
-    </div>
+  <div id="mode-row" style="
+    display:flex; gap:8px; margin-bottom:8px;
+    font-family:var(--mono); font-size:10px;
+  ">
+    <span style="color:var(--text-dim)">Generate with:</span>
+    <label style="display:flex;align-items:center;gap:4px;cursor:pointer">
+      <input type="radio" name="gen-mode" value="builtin" checked
+             onchange="setGenMode('builtin')">
+      <span style="color:var(--text)">Built-in</span>
+    </label>
+    <label style="display:flex;align-items:center;gap:4px;cursor:pointer">
+      <input type="radio" name="gen-mode" value="export"
+             onchange="setGenMode('export')">
+      <span style="color:var(--cyan)">Export →</span>
+    </label>
+    <span id="export-target-select" style="display:none">
+      <select id="export-target" style="
+        background:var(--bg-input); border:1px solid var(--border);
+        border-radius:2px; color:var(--cyan); font-family:var(--mono);
+        font-size:10px; padding:2px 6px;
+      ">
+        <option value="claude">Claude</option>
+        <option value="chatgpt">ChatGPT</option>
+        <option value="gemini">Gemini</option>
+      </select>
+    </span>
   </div>
+  <div id="input-row">
+    <textarea id="question-input" ...></textarea>
+    <button id="send-btn" onclick="sendQuestion()">Send</button>
+  </div>
+</div>
 
 </div>
 
@@ -120,7 +141,19 @@
       <button id="query-graph-btn" onclick="toggleQueryGraph(this)">
         Focus on evidence
       </button>
-      <div style="font-family:var(--mono);font-size:10px;color:var(--text-dim);margin-top:4px" id="evidence-count-label">
+      <button style="
+        width:100%; padding:5px 0; margin-top:4px;
+        background:none; border:1px solid var(--border);
+        border-radius:2px; color:var(--text-dim);
+        font-family:var(--cond); font-size:11px;
+        font-weight:600; letter-spacing:0.06em;
+        text-transform:uppercase; cursor:pointer;
+        transition:all 0.15s;
+      " onmouseover="this.style.borderColor='var(--cyan)';this.style.color='var(--cyan)'"
+         onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--text-dim)'"
+         onclick="showFullGraph()">Show full graph</button>
+      <div id="evidence-count-label"
+           style="font-family:var(--mono);font-size:10px;color:var(--text-dim);margin-top:4px">
         no query yet
       </div>
     </div>

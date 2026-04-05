@@ -86,13 +86,17 @@ html, body { height:100%; overflow:hidden; background:var(--bg); color:var(--tex
 </div>
 
 <script>
-const params  = new URLSearchParams(window.location.search);
-const nodeId  = params.get('id')      || '';
-const page    = parseInt(params.get('page') || '1');
-const snippet = params.get('snippet') || '';
-const year    = params.get('year')    || '';
-const title   = params.get('title')   || nodeId;
+const params   = new URLSearchParams(window.location.search);
+const chunkId  = params.get('chunk_id') || '';
+const paperId  = params.get('paper_id') || '';
+const page     = parseInt(params.get('page') || '1');
 
+// Use highlighted PDF if we have a chunk_id, otherwise plain PDF
+const pdfSrc = chunkId
+  ? `/api/pdf-highlighted/${chunkId}#page=${page}`
+  : `/api/pdf/${paperId}#page=${page}`;
+
+document.getElementById('pdf-frame').src = pdfSrc;
 document.getElementById('paper-title').textContent = decodeURIComponent(title);
 document.getElementById('info-id').textContent     = nodeId.replace('arxiv:','');
 document.getElementById('info-year').textContent   = year;
